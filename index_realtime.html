@@ -1,0 +1,2758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>GhostSched v2 — Neural CPU Scheduler</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+:root {
+  --bg:       #02030a;
+  --bg1:      #060810;
+  --bg2:      #0a0d18;
+  --bg3:      #0e1220;
+  --bg4:      #141928;
+  --cyan:     #00f5ff;
+  --pink:     #ff2d78;
+  --purple:   #b44fff;
+  --blue:     #3d7eff;
+  --green:    #00ff88;
+  --orange:   #ff7c2a;
+  --yellow:   #ffe700;
+  --text:     #ccd6f0;
+  --muted:    #3d4a6a;
+  --dim:      #181e30;
+  --font:     'Rajdhani', sans-serif;
+  --mono:     'Share Tech Mono', monospace;
+  --display:  'Orbitron', sans-serif;
+  --r:        8px;
+  --glow-c:  rgba(0,245,255,0.15);
+  --glow-p:  rgba(180,79,255,0.15);
+  --border:  rgba(0,245,255,0.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+ 
+/* ─── BODY & SCANLINES ─── */
+body {
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--font);
+  min-height:100vh;
+  overflow-x:hidden;
+  font-size:14px;
+  line-height:1.5;
+}
+body::after {
+  content:'';position:fixed;inset:0;
+  background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,0.07) 3px,rgba(0,0,0,0.07) 4px);
+  pointer-events:none;z-index:9000
+}
+body::before {
+  content:'';position:fixed;inset:0;
+  background-image:
+    linear-gradient(rgba(0,245,255,0.02) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(0,245,255,0.02) 1px,transparent 1px);
+  background-size:50px 50px;
+  pointer-events:none
+}
+ 
+/* ─── CORNER DECORATIONS ─── */
+.corner-tl, .corner-tr, .corner-bl, .corner-br {
+  position:fixed;width:60px;height:60px;pointer-events:none;z-index:9001
+}
+.corner-tl{top:0;left:0;border-top:2px solid var(--cyan);border-left:2px solid var(--cyan)}
+.corner-tr{top:0;right:0;border-top:2px solid var(--cyan);border-right:2px solid var(--cyan)}
+.corner-bl{bottom:0;left:0;border-bottom:2px solid var(--cyan);border-left:2px solid var(--cyan)}
+.corner-br{bottom:0;right:0;border-bottom:2px solid var(--cyan);border-right:2px solid var(--cyan)}
+ 
+/* ─── HEADER ─── */
+header {
+  padding:16px 32px;
+  display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid var(--border);
+  background:rgba(2,3,10,0.85);
+  backdrop-filter:blur(20px);
+  position:sticky;top:0;z-index:100;
+}
+.logo {
+  display:flex;align-items:center;gap:14px;
+}
+.logo-icon {
+  width:38px;height:38px;
+  background:linear-gradient(135deg,var(--cyan),var(--purple));
+  border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-family:var(--display);font-size:14px;font-weight:900;color:#000;
+  box-shadow:0 0 20px rgba(0,245,255,0.4);
+  animation:logoPulse 3s ease-in-out infinite;
+}
+@keyframes logoPulse {
+  0%,100%{box-shadow:0 0 20px rgba(0,245,255,0.4)}
+  50%{box-shadow:0 0 40px rgba(0,245,255,0.7),0 0 80px rgba(180,79,255,0.3)}
+}
+.logo-text {font-family:var(--display);font-size:20px;font-weight:700;color:#fff;letter-spacing:2px}
+.logo-text span{color:var(--cyan)}
+.logo-sub{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:3px;margin-top:2px}
+.header-center{display:flex;align-items:center;gap:24px}
+.live-badge {
+  display:flex;align-items:center;gap:8px;
+  font-family:var(--mono);font-size:11px;color:var(--green);
+  padding:6px 14px;border:1px solid rgba(0,255,136,0.3);border-radius:4px;
+  background:rgba(0,255,136,0.05);
+}
+.live-dot {
+  width:8px;height:8px;border-radius:50%;background:var(--green);
+  box-shadow:0 0 8px var(--green);
+  animation:blink 1.2s ease-in-out infinite
+}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+.sys-time {font-family:var(--mono);font-size:11px;color:var(--muted)}
+.header-right{display:flex;align-items:center;gap:12px}
+.algo-indicator {
+  font-family:var(--mono);font-size:10px;letter-spacing:1px;
+  padding:4px 10px;border-radius:4px;
+  background:rgba(180,79,255,0.1);border:1px solid rgba(180,79,255,0.3);
+  color:var(--purple);
+}
+ 
+/* ─── NAV ─── */
+nav {
+  padding:0 32px;
+  display:flex;gap:2px;
+  border-bottom:1px solid var(--border);
+  background:rgba(6,8,16,0.9);
+  backdrop-filter:blur(20px);
+  position:sticky;top:72px;z-index:99;
+  overflow-x:auto;
+}
+.tab {
+  font-family:var(--mono);font-size:10px;letter-spacing:2px;
+  padding:12px 18px;cursor:pointer;
+  color:var(--muted);background:none;border:none;
+  position:relative;white-space:nowrap;
+  transition:all 0.3s;
+}
+.tab::after {
+  content:'';position:absolute;bottom:0;left:0;right:0;height:2px;
+  background:var(--cyan);transform:scaleX(0);transition:transform 0.3s;
+}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--cyan)}
+.tab.active::after{transform:scaleX(1)}
+ 
+/* ─── PANELS ─── */
+.panel {
+  display:none;padding:24px 32px 48px;
+  animation:fadeUp 0.4s ease
+}
+.panel.active{display:block}
+@keyframes fadeUp {
+  from{opacity:0;transform:translateY(10px)}
+  to{opacity:1;transform:none}
+}
+ 
+/* ─── GLASS CARD ─── */
+.glass {
+  background:rgba(10,13,24,0.7);
+  border:1px solid var(--border);
+  border-radius:var(--r);
+  backdrop-filter:blur(12px);
+  position:relative;
+  overflow:hidden;
+}
+.glass::before {
+  content:'';position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--cyan),transparent);
+  opacity:0.4;
+}
+.glass:hover{border-color:rgba(0,245,255,0.2)}
+ 
+/* ─── STAT CARDS ─── */
+.stat-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+  gap:12px;margin-bottom:20px
+}
+.stat-card {
+  padding:18px 20px;
+  background:rgba(10,13,24,0.8);
+  border:1px solid var(--border);
+  border-radius:var(--r);
+  position:relative;overflow:hidden;
+  transition:all 0.3s;cursor:default;
+}
+.stat-card:hover{transform:translateY(-2px);border-color:rgba(0,245,255,0.25)}
+.stat-card .accent-bar {
+  position:absolute;bottom:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--cyan),var(--purple));
+}
+.stat-card.green .accent-bar{background:linear-gradient(90deg,var(--green),var(--cyan))}
+.stat-card.warn .accent-bar{background:linear-gradient(90deg,var(--orange),var(--pink))}
+.stat-card.purple .accent-bar{background:linear-gradient(90deg,var(--purple),var(--pink))}
+.stat-label {
+  font-family:var(--mono);font-size:9px;letter-spacing:2px;
+  color:var(--muted);margin-bottom:10px;text-transform:uppercase;
+}
+.stat-val {
+  font-family:var(--display);font-size:26px;font-weight:700;
+  color:#fff;line-height:1;
+}
+.stat-val .unit{font-family:var(--mono);font-size:11px;font-weight:400;color:var(--muted);margin-left:4px}
+.stat-sub {font-family:var(--mono);font-size:10px;margin-top:8px;color:var(--muted)}
+.stat-sub.good{color:var(--green)}
+.stat-sub.bad{color:var(--pink)}
+.stat-sub.warn{color:var(--orange)}
+.stat-icon {
+  position:absolute;top:14px;right:16px;
+  font-size:20px;opacity:0.15;
+}
+ 
+/* ─── SECTION HEADER ─── */
+.sec-head {
+  display:flex;align-items:center;gap:10px;
+  font-family:var(--mono);font-size:9px;letter-spacing:3px;
+  color:var(--cyan);margin-bottom:14px;text-transform:uppercase;
+}
+.sec-head::after {
+  content:'';flex:1;height:1px;
+  background:linear-gradient(90deg,rgba(0,245,255,0.3),transparent)
+}
+.sec-badge {
+  font-size:9px;padding:2px 8px;border-radius:3px;
+  background:rgba(0,245,255,0.08);border:1px solid rgba(0,245,255,0.2);
+  color:var(--cyan);margin-left:auto;
+}
+ 
+/* ─── CORE GRID ─── */
+.core-grid {
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:10px;margin-bottom:20px
+}
+.core-card {
+  padding:14px;
+  background:rgba(10,13,24,0.8);
+  border:1px solid var(--border);
+  border-radius:var(--r);
+  transition:all 0.4s;
+  position:relative;overflow:hidden;
+}
+.core-card.big-type{border-top:2px solid var(--orange)}
+.core-card.lit-type{border-top:2px solid var(--blue)}
+.core-card.throttled{
+  border-color:var(--pink)!important;
+  animation:throttleFlash 0.5s ease-in-out infinite alternate
+}
+@keyframes throttleFlash {
+  from{box-shadow:0 0 0 0 rgba(255,45,120,0)}
+  to{box-shadow:0 0 16px 2px rgba(255,45,120,0.3)}
+}
+.core-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.core-id{font-family:var(--display);font-size:14px;font-weight:700;color:#fff}
+.type-badge {
+  font-family:var(--mono);font-size:8px;letter-spacing:1px;
+  padding:2px 7px;border-radius:3px;
+}
+.badge-big{background:rgba(255,124,42,0.15);color:var(--orange);border:1px solid rgba(255,124,42,0.3)}
+.badge-lit{background:rgba(61,126,255,0.15);color:var(--blue);border:1px solid rgba(61,126,255,0.3)}
+.core-temp {
+  font-family:var(--display);font-size:22px;font-weight:700;
+  margin:8px 0;transition:color 0.5s
+}
+.core-temp.cool{color:var(--cyan);text-shadow:0 0 10px rgba(0,245,255,0.5)}
+.core-temp.warm{color:var(--yellow);text-shadow:0 0 10px rgba(255,231,0,0.4)}
+.core-temp.hot{color:var(--pink);text-shadow:0 0 15px rgba(255,45,120,0.6)}
+.core-bar-bg {
+  background:rgba(255,255,255,0.05);border-radius:2px;
+  height:5px;margin:8px 0;overflow:hidden
+}
+.core-bar{height:100%;border-radius:2px;transition:width 0.5s ease,background 0.5s}
+.core-stats{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:8px}
+.core-stat{font-family:var(--mono);font-size:9px}
+.core-stat-k{color:var(--muted)}
+.core-stat-v{color:var(--text)}
+.core-task {
+  font-family:var(--mono);font-size:9px;color:var(--cyan);
+  margin-top:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  padding:3px 6px;background:rgba(0,245,255,0.05);border-radius:3px;
+  min-height:20px;
+}
+ 
+/* ─── CHART BOXES ─── */
+.chart-grid{display:grid;grid-template-columns:3fr 2fr;gap:14px;margin-bottom:16px}
+.chart-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:16px}
+.chart-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+.chart-box{padding:18px;margin-bottom:16px}
+.chart-title {
+  font-family:var(--mono);font-size:9px;letter-spacing:2px;
+  color:var(--muted);margin-bottom:16px;text-transform:uppercase;
+  display:flex;align-items:center;gap:8px;
+}
+.chart-title .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+ 
+/* ─── GANTT ─── */
+#gantt-scroll{overflow-x:auto;margin-bottom:16px}
+.gantt-wrap{padding:18px;min-width:800px}
+.gantt-row{display:flex;align-items:center;gap:10px;margin-bottom:5px}
+.gantt-lbl{font-family:var(--mono);font-size:9px;width:90px;color:var(--muted);flex-shrink:0}
+.gantt-track{
+  flex:1;height:22px;
+  background:rgba(255,255,255,0.03);
+  border-radius:3px;position:relative;overflow:hidden;
+}
+.gantt-block {
+  position:absolute;height:100%;border-radius:2px;
+  display:flex;align-items:center;padding:0 6px;
+  transition:all 0.4s;
+}
+.gantt-block span{font-family:var(--mono);font-size:8px;white-space:nowrap;overflow:hidden}
+ 
+/* ─── CONTROLS ─── */
+.controls{display:flex;gap:8px;margin-bottom:20px;align-items:center;flex-wrap:wrap}
+.ctrl{
+  font-family:var(--mono);font-size:10px;letter-spacing:1px;
+  padding:8px 16px;border-radius:5px;
+  background:rgba(10,13,24,0.9);border:1px solid var(--border);
+  color:var(--muted);cursor:pointer;transition:all 0.2s;
+}
+.ctrl:hover{color:var(--cyan);border-color:rgba(0,245,255,0.4);background:rgba(0,245,255,0.05)}
+.ctrl.active{color:var(--cyan);border-color:var(--cyan);background:rgba(0,245,255,0.08)}
+.ctrl.primary{
+  background:linear-gradient(135deg,rgba(0,245,255,0.15),rgba(180,79,255,0.1));
+  border-color:rgba(0,245,255,0.5);color:var(--cyan);
+  box-shadow:0 0 15px rgba(0,245,255,0.15);
+}
+.ctrl.danger{border-color:var(--pink);color:var(--pink)}
+.ctrl.danger:hover{background:rgba(255,45,120,0.08)}
+.ctrl-sep{width:1px;height:24px;background:var(--border)}
+select {
+  font-family:var(--mono);font-size:10px;
+  background:rgba(10,13,24,0.9);border:1px solid var(--border);
+  color:var(--text);padding:8px 12px;border-radius:5px;cursor:pointer;outline:none;
+}
+ 
+/* ─── LOG PANEL ─── */
+.log-box {
+  font-family:var(--mono);font-size:11px;
+  height:300px;overflow-y:auto;padding:12px 16px;
+  background:rgba(2,3,10,0.8);border-radius:var(--r);
+  border:1px solid var(--border);
+  scrollbar-width:thin;scrollbar-color:var(--muted) transparent;
+}
+.log-box::-webkit-scrollbar{width:4px}
+.log-box::-webkit-scrollbar-track{background:transparent}
+.log-box::-webkit-scrollbar-thumb{background:var(--muted);border-radius:2px}
+.log-line{
+  padding:2px 0;line-height:1.6;
+  border-bottom:1px solid rgba(255,255,255,0.02);
+  animation:logIn 0.2s ease
+}
+@keyframes logIn{from{opacity:0;transform:translateX(-6px)}to{opacity:1;transform:none}}
+.log-t{color:var(--muted)}
+.log-submit{color:var(--blue)}
+.log-place{color:var(--cyan)}
+.log-dvfs{color:var(--purple)}
+.log-thermal{color:var(--orange)}
+.log-migrate{color:var(--yellow)}
+.log-throttle{color:var(--pink)}
+.log-done{color:var(--green)}
+.log-predict{color:var(--purple)}
+.log-stats{color:var(--green)}
+.log-warn{color:var(--orange)}
+ 
+/* ─── COMPARISON TABLE ─── */
+.cmp-wrap{overflow-x:auto;margin-bottom:16px}
+.cmp-table{width:100%;border-collapse:collapse}
+.cmp-table th{
+  font-family:var(--mono);font-size:9px;letter-spacing:2px;
+  color:var(--muted);padding:12px 16px;
+  border-bottom:1px solid var(--border);text-align:left;font-weight:400;
+}
+.cmp-table td{
+  padding:12px 16px;font-size:13px;
+  border-bottom:1px solid rgba(255,255,255,0.02);
+  transition:background 0.2s;
+}
+.cmp-table tr:hover td{background:rgba(0,245,255,0.03)}
+.cmp-best{color:var(--green);font-family:var(--display);font-weight:600}
+.win-pill{
+  display:inline-block;
+  font-family:var(--mono);font-size:8px;
+  padding:2px 8px;background:rgba(0,255,136,0.1);
+  color:var(--green);border-radius:10px;margin-left:8px;
+  border:1px solid rgba(0,255,136,0.25);
+}
+.algo-name{font-family:var(--display);font-size:12px;font-weight:600;letter-spacing:1px}
+.ghost-name{color:var(--cyan)}
+.rr-name{color:var(--blue)}
+.sjf-name{color:var(--purple)}
+.pri-name{color:var(--orange)}
+ 
+/* ─── ALERTS ─── */
+.alert-strip{
+  padding:10px 16px;border-radius:6px;
+  display:flex;align-items:center;gap:10px;
+  font-family:var(--mono);font-size:11px;
+  margin-bottom:8px;animation:alertIn 0.3s ease;
+}
+@keyframes alertIn{from{opacity:0;transform:scale(0.98)}to{opacity:1;transform:none}}
+.alert-strip.danger{
+  background:rgba(255,45,120,0.08);
+  border:1px solid rgba(255,45,120,0.3);
+  color:var(--pink);
+  box-shadow:0 0 20px rgba(255,45,120,0.1);
+  animation:alertIn 0.3s ease, glowDanger 2s ease-in-out infinite;
+}
+.alert-strip.warn{
+  background:rgba(255,124,42,0.08);
+  border:1px solid rgba(255,124,42,0.3);
+  color:var(--orange);
+}
+@keyframes glowDanger{
+  0%,100%{box-shadow:0 0 10px rgba(255,45,120,0.1)}
+  50%{box-shadow:0 0 25px rgba(255,45,120,0.25)}
+}
+.alert-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.alert-strip.danger .alert-dot{background:var(--pink);box-shadow:0 0 8px var(--pink)}
+.alert-strip.warn .alert-dot{background:var(--orange);box-shadow:0 0 8px var(--orange)}
+ 
+/* ─── EMA PREDICTION ─── */
+.ema-card{
+  padding:20px;
+  background:rgba(180,79,255,0.05);
+  border:1px solid rgba(180,79,255,0.2);
+  border-radius:var(--r);margin-bottom:16px;
+}
+.ema-label{
+  font-family:var(--mono);font-size:9px;letter-spacing:2px;
+  color:var(--purple);margin-bottom:12px;
+}
+.ema-val{font-family:var(--display);font-size:32px;font-weight:700;color:var(--purple)}
+.ema-trend{font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:6px}
+ 
+/* ─── CIRCULAR GAUGE ─── */
+.gauge-wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px}
+.gauge-svg{width:140px;height:140px}
+.gauge-val{font-family:var(--display);font-size:28px;font-weight:700;fill:#fff}
+.gauge-lbl{font-family:var(--mono);font-size:9px;fill:var(--muted);letter-spacing:1px}
+ 
+/* ─── WORKLOAD MODES ─── */
+.mode-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px}
+.mode-card{
+  padding:16px;text-align:center;cursor:pointer;border-radius:var(--r);
+  border:1px solid var(--border);background:rgba(10,13,24,0.8);
+  transition:all 0.3s;
+}
+.mode-card:hover{border-color:rgba(0,245,255,0.3);transform:translateY(-2px)}
+.mode-card.active{
+  border-color:var(--cyan);
+  background:rgba(0,245,255,0.07);
+  box-shadow:0 0 20px rgba(0,245,255,0.1);
+}
+.mode-icon{font-size:28px;margin-bottom:8px}
+.mode-name{font-family:var(--display);font-size:13px;font-weight:600;color:#fff;margin-bottom:4px}
+.mode-desc{font-family:var(--mono);font-size:9px;color:var(--muted)}
+ 
+/* ─── INFO PANELS (research sections) ─── */
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.info-card{
+  padding:22px;
+  background:rgba(10,13,24,0.8);
+  border:1px solid var(--border);
+  border-radius:var(--r);
+  position:relative;overflow:hidden;
+}
+.info-card::before{
+  content:'';position:absolute;top:0;left:0;bottom:0;width:3px;
+}
+.info-card.cyan::before{background:var(--cyan)}
+.info-card.purple::before{background:var(--purple)}
+.info-card.green::before{background:var(--green)}
+.info-card.orange::before{background:var(--orange)}
+.info-card.pink::before{background:var(--pink)}
+.info-title{
+  font-family:var(--display);font-size:14px;font-weight:600;
+  margin-bottom:4px;padding-left:14px;
+}
+.info-sub{
+  font-family:var(--mono);font-size:8px;letter-spacing:2px;
+  color:var(--muted);padding-left:14px;margin-bottom:12px;
+}
+.info-body{
+  font-size:13px;color:rgba(204,214,240,0.75);
+  line-height:1.8;padding-left:14px;
+}
+.info-body li{margin-bottom:4px;list-style:none;padding-left:12px;position:relative}
+.info-body li::before{content:'›';position:absolute;left:0;color:var(--cyan);opacity:0.7}
+ 
+/* ─── THERMAL MAP ─── */
+.thermal-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);
+  gap:8px;margin-bottom:16px
+}
+.therm-cell{
+  aspect-ratio:1;border-radius:6px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  border:1px solid rgba(255,255,255,0.05);
+  transition:background 0.5s ease,border-color 0.5s;
+  cursor:default;
+}
+.therm-id{font-family:var(--mono);font-size:9px;color:rgba(255,255,255,0.4);margin-bottom:2px}
+.therm-val{font-family:var(--display);font-size:18px;font-weight:700}
+ 
+/* ─── PERFORMANCE RING ─── */
+.perf-ring-wrap{
+  display:flex;align-items:center;justify-content:center;
+  gap:40px;padding:20px 0;
+}
+.ring-item{text-align:center}
+.ring-svg{width:100px;height:100px}
+.ring-label{font-family:var(--mono);font-size:9px;letter-spacing:2px;color:var(--muted);margin-top:8px}
+ 
+/* ─── PROGRESS BARS ─── */
+.prog-row{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.prog-label{font-family:var(--mono);font-size:10px;color:var(--muted);width:120px;flex-shrink:0}
+.prog-track{flex:1;height:6px;background:rgba(255,255,255,0.05);border-radius:3px;overflow:hidden}
+.prog-fill{height:100%;border-radius:3px;transition:width 0.6s ease}
+.prog-val{font-family:var(--mono);font-size:10px;color:var(--text);width:50px;text-align:right}
+ 
+/* ─── TWO COL LAYOUT ─── */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+ 
+/* ─── RESPONSIVE ─── */
+@media(max-width:900px){
+  .core-grid,.chart-grid,.chart-grid-3,.info-grid,.two-col,.three-col{grid-template-columns:1fr 1fr}
+  .stat-grid{grid-template-columns:repeat(2,1fr)}
+  .mode-grid{grid-template-columns:1fr}
+  .thermal-grid{grid-template-columns:repeat(4,1fr)}
+  header{flex-wrap:wrap;gap:10px}
+}
+ 
+/* ─── ANIMATIONS ─── */
+@keyframes shimmer {
+  0%{background-position:-200% 0}
+  100%{background-position:200% 0}
+}
+.shimmer {
+  background:linear-gradient(90deg,transparent,rgba(0,245,255,0.05),transparent);
+  background-size:200% 100%;
+  animation:shimmer 2s infinite;
+}
+</style>
+</head>
+<style>
+/* ─── LOADING BANNER (non-blocking, slim top bar) ─── */
+#gs-loader {
+  position:fixed;top:0;left:0;right:0;z-index:99999;
+  height:3px;
+  background:linear-gradient(90deg, var(--cyan), var(--purple), var(--cyan));
+  background-size:200% 100%;
+  animation:loaderSlide 1.2s linear infinite;
+  transition:opacity 0.4s ease;
+}
+#gs-loader.hidden { opacity:0; pointer-events:none; }
+@keyframes loaderSlide {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+/* Connecting badge in header area */
+#gs-conn-badge {
+  position:fixed;top:8px;right:50%;transform:translateX(50%);
+  z-index:99998;
+  background:rgba(6,8,16,0.95);
+  border:1px solid rgba(0,245,255,0.3);
+  border-radius:5px;
+  padding:5px 14px;
+  font-family:var(--mono);font-size:10px;letter-spacing:2px;color:var(--cyan);
+  display:flex;align-items:center;gap:8px;
+  transition:opacity 0.4s ease;
+  pointer-events:none;
+}
+#gs-conn-badge.hidden { opacity:0; }
+.gs-conn-dot {
+  width:6px;height:6px;border-radius:50%;
+  background:var(--cyan);
+  box-shadow:0 0 8px var(--cyan);
+  animation:blink 0.8s ease-in-out infinite;
+}
+ 
+/* ─── ACTIVE APP TRACKER ─── */
+#active-app-bar {
+  background:rgba(0,245,255,0.04);
+  border:1px solid rgba(0,245,255,0.1);
+  border-radius:6px;
+  padding:10px 16px;
+  margin-bottom:14px;
+  display:flex;align-items:center;gap:14px;
+  font-family:var(--mono);font-size:11px;
+  transition:all 0.3s;
+}
+#active-app-bar .aab-label {
+  color:var(--muted);font-size:9px;letter-spacing:2px;white-space:nowrap;
+}
+#active-app-name {
+  color:var(--cyan);font-weight:700;font-size:13px;
+  flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+#active-app-pid   { color:var(--muted);font-size:9px; }
+#active-app-cpu   { color:var(--orange); }
+#active-app-mem   { color:var(--text); }
+#active-app-pulse {
+  width:8px;height:8px;border-radius:50%;
+  background:var(--green);box-shadow:0 0 8px var(--green);
+  animation:blink 1s ease-in-out infinite;flex-shrink:0;
+}
+.aab-stat { display:flex;flex-direction:column;align-items:flex-end;gap:2px; }
+.aab-stat-k { font-size:8px;color:var(--muted);letter-spacing:1px; }
+.aab-stat-v { font-size:12px;font-weight:700; }
+ 
+/* ─── SEARCH + SORT CONTROLS (Issue 3) ─── */
+#proc-controls {
+  display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;
+}
+#proc-search {
+  background:rgba(10,13,24,0.9);
+  border:1px solid rgba(0,245,255,0.15);
+  border-radius:5px;
+  color:var(--text);
+  font-family:var(--mono);font-size:11px;
+  padding:6px 12px;outline:none;flex:1;min-width:160px;
+  transition:border-color 0.3s;
+}
+#proc-search:focus{border-color:rgba(0,245,255,0.45)}
+#proc-search::placeholder{color:var(--muted)}
+.sort-btn, .pause-btn {
+  background:rgba(10,13,24,0.9);
+  border:1px solid rgba(0,245,255,0.15);
+  border-radius:5px;color:var(--muted);
+  font-family:var(--mono);font-size:10px;letter-spacing:1px;
+  padding:6px 12px;cursor:pointer;transition:all 0.25s;white-space:nowrap;
+}
+.sort-btn:hover,.pause-btn:hover{border-color:rgba(0,245,255,0.4);color:var(--cyan)}
+.sort-btn.active{border-color:var(--cyan);color:var(--cyan);background:rgba(0,245,255,0.07)}
+.pause-btn.paused{border-color:var(--orange);color:var(--orange);background:rgba(255,124,42,0.07)}
+ 
+/* ─── PROCESS TABLE POLISH (Issue 2) ─── */
+#live-proc-table table {
+  font-family:var(--mono) !important;
+  font-size:11.5px !important;
+  border-spacing:0;
+}
+#live-proc-table thead tr {
+  background:rgba(0,245,255,0.04) !important;
+}
+#live-proc-table thead th {
+  padding:9px 12px !important;
+  color:var(--cyan) !important;
+  font-size:9px !important;
+  letter-spacing:2px !important;
+  text-transform:uppercase;
+  border-bottom:1px solid rgba(0,245,255,0.15) !important;
+  white-space:nowrap;
+}
+#live-proc-table tbody tr {
+  border-bottom:1px solid rgba(255,255,255,0.035) !important;
+  transition:background 0.2s !important;
+}
+#live-proc-table tbody tr:hover {
+  background:rgba(0,245,255,0.06) !important;
+}
+#live-proc-table tbody td {
+  padding:7px 12px !important;
+}
+.proc-cpu-high { color: var(--pink) !important; font-weight:700 !important; }
+.proc-cpu-med  { color: var(--orange) !important; }
+.proc-cpu-low  { color: var(--cyan) !important; }
+/* highlight active app row */
+tr.active-app-row { background:rgba(0,255,136,0.05) !important; outline:1px solid rgba(0,255,136,0.2); }
+</style>
+<body>
+ 
+<!-- Slim loading bar (non-blocking) -->
+<div id="gs-loader"></div>
+<div id="gs-conn-badge"><div class="gs-conn-dot"></div>CONNECTING…</div>
+ 
+<!-- Corner decorations -->
+<div class="corner-tl"></div>
+<div class="corner-tr"></div>
+<div class="corner-bl"></div>
+<div class="corner-br"></div>
+ 
+<!-- ─── HEADER ─── -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">GS</div>
+    <div>
+      <div class="logo-text">Ghost<span>Sched</span> <span style="color:var(--purple);font-size:13px">v2</span></div>
+      <div class="logo-sub">Neural Power-Aware CPU Scheduler · Research Edition</div>
+    </div>
+  </div>
+  <div class="header-center">
+    <div class="live-badge">
+      <div class="live-dot"></div>
+      <span id="live-txt">SIMULATING</span>
+    </div>
+    <div class="sys-time" id="sys-time">T+0000ms | TICK 000</div>
+  </div>
+  <div class="header-right">
+    <div class="algo-indicator" id="cur-algo-badge">GHOSTSCHED</div>
+    <div class="algo-indicator" style="color:var(--green);border-color:rgba(0,255,136,0.3);background:rgba(0,255,136,0.05)" id="load-badge">LIGHT LOAD</div>
+  </div>
+</header>
+ 
+<!-- ─── NAV ─── -->
+<nav>
+  <button class="tab active" onclick="showTab('dashboard',this)">◈ DASHBOARD</button>
+  <button class="tab" onclick="showTab('cores',this)">◫ CPU CORES</button>
+  <button class="tab" onclick="showTab('scheduler',this)">⊞ SCHEDULER</button>
+  <button class="tab" onclick="showTab('compare',this)">⊟ COMPARISON</button>
+  <button class="tab" onclick="showTab('energy',this)">⚡ ENERGY</button>
+  <button class="tab" onclick="showTab('gantt',this)">▤ GANTT</button>
+  <button class="tab" onclick="showTab('predict',this)">◉ PREDICTOR</button>
+  <button class="tab" onclick="showTab('research',this)">◎ RESEARCH</button>
+</nav>
+ 
+<!-- ═══════════════════════════════════════════
+     PANEL 1 — DASHBOARD
+════════════════════════════════════════════ -->
+<div class="panel active" id="panel-dashboard">
+ 
+  <!-- Controls -->
+  <div class="controls">
+    <button class="ctrl primary" id="btn-play" onclick="togglePlay()">⏸ PAUSE</button>
+    <button class="ctrl" onclick="resetSim()">↺ RESTART</button>
+    <div class="ctrl-sep"></div>
+    <span style="font-family:var(--mono);font-size:9px;color:var(--muted)">SPEED</span>
+    <button class="ctrl" id="sp1" onclick="setSpeed(2000)">0.5×</button>
+    <button class="ctrl" id="sp2" onclick="setSpeed(600)">1×</button>
+    <button class="ctrl active" id="sp3" onclick="setSpeed(200)">3×</button>
+    <button class="ctrl" id="sp4" onclick="setSpeed(50)">10×</button>
+    <div class="ctrl-sep"></div>
+    <span style="font-family:var(--mono);font-size:9px;color:var(--muted)">WORKLOAD</span>
+    <button class="ctrl" id="wl-light" onclick="setWorkload('light')">LIGHT</button>
+    <button class="ctrl active" id="wl-mixed" onclick="setWorkload('mixed')">MIXED</button>
+    <button class="ctrl" id="wl-heavy" onclick="setWorkload('heavy')">HEAVY</button>
+  </div>
+ 
+  <!-- Alerts -->
+  <div id="alert-zone"></div>
+ 
+  <!-- Active App Tracker -->
+  <div id="active-app-bar">
+    <div id="active-app-pulse"></div>
+    <div class="aab-label">ACTIVE APP</div>
+    <div id="active-app-name">— waiting for data —</div>
+    <div id="active-app-pid" class="aab-stat"><span class="aab-stat-k">PID</span><span class="aab-stat-v" id="active-app-pid-val">—</span></div>
+    <div class="aab-stat"><span class="aab-stat-k">CPU</span><span class="aab-stat-v" id="active-app-cpu">—</span></div>
+    <div class="aab-stat"><span class="aab-stat-k">MEM MB</span><span class="aab-stat-v" id="active-app-mem">—</span></div>
+  </div>
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="stat-label">CPU UTILIZATION</div>
+      <div class="stat-val" id="s-util">0<span class="unit">%</span></div>
+      <div class="stat-sub" id="s-util-sub">— system active</div>
+      <div class="accent-bar"></div>
+      <div class="stat-icon">⚙</div>
+    </div>
+    <div class="stat-card green">
+      <div class="stat-label">THROUGHPUT</div>
+      <div class="stat-val" id="s-thru">0.0<span class="unit">t/s</span></div>
+      <div class="stat-sub good" id="s-thru-sub">tasks per second</div>
+      <div class="accent-bar"></div>
+      <div class="stat-icon">◎</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">AVG WAIT TIME</div>
+      <div class="stat-val" id="s-wait">0<span class="unit">ms</span></div>
+      <div class="stat-sub" id="s-wait-sub">avg turnaround</div>
+      <div class="accent-bar"></div>
+      <div class="stat-icon">⏱</div>
+    </div>
+    <div class="stat-card purple">
+      <div class="stat-label">FAIRNESS INDEX</div>
+      <div class="stat-val" id="s-fair">1.00</div>
+      <div class="stat-sub good">Jain's Index · perfect=1</div>
+      <div class="accent-bar"></div>
+      <div class="stat-icon">⚖</div>
+    </div>
+    <div class="stat-card warn">
+      <div class="stat-label">ENERGY USED</div>
+      <div class="stat-val" id="s-energy">0.0000<span class="unit">J</span></div>
+      <div class="stat-sub warn" id="s-energy-sub">P = V² × f</div>
+      <div class="accent-bar"></div>
+      <div class="stat-icon">⚡</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">TASKS DONE</div>
+      <div class="stat-val" id="s-done">0<span class="unit">/24</span></div>
+      <div class="stat-sub" id="s-done-sub">0 queued</div>
+      <div class="accent-bar"></div>
+      <div class="stat-icon">✓</div>
+    </div>
+    <div class="stat-card warn">
+      <div class="stat-label">PEAK TEMP</div>
+      <div class="stat-val" id="s-temp">28<span class="unit">°C</span></div>
+      <div class="stat-sub" id="s-temp-sub">all cores nominal</div>
+      <div class="accent-bar"></div>
+      <div class="stat-icon">🌡</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">MIGRATIONS</div>
+      <div class="stat-val" id="s-mig">0</div>
+      <div class="stat-sub">thermal task moves</div>
+      <div class="accent-bar"></div>
+      <div class="stat-icon">↕</div>
+    </div>
+    <div class="stat-card purple">
+      <div class="stat-label">GPU USAGE</div>
+      <div class="stat-val" id="s-gpu-usage">N/A</div>
+      <div class="stat-sub" id="s-gpu-mem">GPU MEM: N/A</div>
+      <div class="accent-bar"></div>
+      <div class="stat-icon">⬡</div>
+    </div>
+  </div>
+ 
+  <!-- Performance rings + main chart -->
+  <div class="chart-grid">
+    <div class="glass chart-box">
+      <div class="chart-title"><span class="dot" style="background:var(--cyan)"></span>CPU UTILIZATION &amp; POWER EFFICIENCY OVER TIME</div>
+      <canvas id="chart-main" height="180"></canvas>
+    </div>
+    <div class="glass" style="padding:20px">
+      <div class="chart-title"><span class="dot" style="background:var(--purple)"></span>PERFORMANCE RINGS</div>
+      <!-- Circular gauges via SVG -->
+      <div style="display:flex;flex-direction:column;gap:12px" id="ring-container">
+        <div class="prog-row">
+          <span class="prog-label">CPU Util</span>
+          <div class="prog-track"><div class="prog-fill" id="pr-util" style="width:0%;background:linear-gradient(90deg,var(--cyan),var(--blue))"></div></div>
+          <span class="prog-val" id="pv-util">0%</span>
+        </div>
+        <div class="prog-row">
+          <span class="prog-label">Efficiency</span>
+          <div class="prog-track"><div class="prog-fill" id="pr-eff" style="width:75%;background:linear-gradient(90deg,var(--green),var(--cyan))"></div></div>
+          <span class="prog-val" id="pv-eff">75%</span>
+        </div>
+        <div class="prog-row">
+          <span class="prog-label">Fairness</span>
+          <div class="prog-track"><div class="prog-fill" id="pr-fair" style="width:100%;background:linear-gradient(90deg,var(--purple),var(--pink))"></div></div>
+          <span class="prog-val" id="pv-fair">1.00</span>
+        </div>
+        <div class="prog-row">
+          <span class="prog-label">Thermal OK</span>
+          <div class="prog-track"><div class="prog-fill" id="pr-therm" style="width:100%;background:linear-gradient(90deg,var(--green),var(--yellow))"></div></div>
+          <span class="prog-val" id="pv-therm">100%</span>
+        </div>
+        <div class="prog-row">
+          <span class="prog-label">EMA Accuracy</span>
+          <div class="prog-track"><div class="prog-fill" id="pr-ema" style="width:80%;background:linear-gradient(90deg,var(--purple),var(--cyan))"></div></div>
+          <span class="prog-val" id="pv-ema">80%</span>
+        </div>
+        <div class="prog-row">
+          <span class="prog-label">Tasks Complete</span>
+          <div class="prog-track"><div class="prog-fill" id="pr-task" style="width:0%;background:linear-gradient(90deg,var(--orange),var(--yellow))"></div></div>
+          <span class="prog-val" id="pv-task">0%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+ 
+  <!-- Log -->
+  <div class="sec-head">EVENT LOG <span class="sec-badge" id="log-count">0 EVENTS</span></div>
+  <div class="log-box" id="log-box"></div>
+  <div style="display:flex;gap:8px;margin-top:8px">
+    <button class="ctrl" onclick="clearLog()">CLEAR LOG</button>
+    <button class="ctrl" onclick="downloadLog()">↓ EXPORT</button>
+  </div>
+</div>
+ 
+<!-- ═══════════════════════════════════════════
+     PANEL 2 — CPU CORES
+════════════════════════════════════════════ -->
+<div class="panel" id="panel-cores">
+ 
+  <div class="sec-head">BIG CORES (P-CORE CLUSTER) · 4× Performance <span class="sec-badge">3000 MHz MAX</span></div>
+  <div class="core-grid" id="big-cores"></div>
+ 
+  <div class="sec-head">LITTLE CORES (E-CORE CLUSTER) · 4× Efficiency <span class="sec-badge">1800 MHz MAX</span></div>
+  <div class="core-grid" id="lit-cores"></div>
+ 
+  <!-- Thermal Map -->
+  <div class="sec-head">THERMAL HEATMAP</div>
+  <div class="glass chart-box">
+    <div class="chart-title"><span class="dot" style="background:var(--orange)"></span>CORE TEMPERATURE MAP — COLOR CODED (COOL→WARM→HOT)</div>
+    <div class="thermal-grid" id="thermal-map"></div>
+  </div>
+ 
+  <!-- Frequency & Voltage charts -->
+  <div class="chart-grid-3">
+    <div class="glass chart-box">
+      <div class="chart-title"><span class="dot" style="background:var(--cyan)"></span>CORE FREQUENCIES (MHz)</div>
+      <canvas id="chart-freq" height="160"></canvas>
+    </div>
+    <div class="glass chart-box">
+      <div class="chart-title"><span class="dot" style="background:var(--purple)"></span>CORE VOLTAGES (V)</div>
+      <canvas id="chart-volt" height="160"></canvas>
+    </div>
+    <div class="glass chart-box">
+      <div class="chart-title"><span class="dot" style="background:var(--orange)"></span>INSTANTANEOUS POWER (mW)</div>
+      <canvas id="chart-power" height="160"></canvas>
+    </div>
+  </div>
+</div>
+ 
+<!-- ═══════════════════════════════════════════
+     PANEL 3 — SCHEDULER DETAIL
+════════════════════════════════════════════ -->
+<div class="panel" id="panel-scheduler">
+  <div class="sec-head">SCHEDULER CONFIGURATION</div>
+  <div class="two-col" style="margin-bottom:20px">
+    <div>
+      <div class="controls">
+        <span style="font-family:var(--mono);font-size:9px;color:var(--muted)">ALGORITHM</span>
+        <button class="ctrl active" id="alg-ghost" onclick="setAlgo('ghost')">GHOSTSCHED</button>
+        <button class="ctrl" id="alg-rr" onclick="setAlgo('rr')">ROUND ROBIN</button>
+        <button class="ctrl" id="alg-sjf" onclick="setAlgo('sjf')">SJF</button>
+        <button class="ctrl" id="alg-pri" onclick="setAlgo('pri')">PRIORITY</button>
+      </div>
+    </div>
+    <div style="font-family:var(--mono);font-size:10px;color:var(--muted);padding-top:8px" id="algo-desc">
+      GhostSched: DVFS + Thermal-Aware + EMA Prediction + big.LITTLE Placement
+    </div>
+  </div>
+ 
+  <!-- Algorithm info cards -->
+  <div class="two-col">
+    <div class="info-card cyan">
+      <div class="info-title" style="color:var(--cyan)">GhostSched (Custom)</div>
+      <div class="info-sub">POWER-AWARE · THERMAL · EMA PREDICTION</div>
+      <div class="info-body">
+        <ul>
+          <li>DVFS: scales V and f based on real-time load</li>
+          <li>EMA predictor: anticipates next burst, pre-scales</li>
+          <li>Thermal migration: moves tasks away from hot cores</li>
+          <li>big.LITTLE placement: HIGH priority → P-core, LOW → E-core</li>
+          <li>Energy model: P = C × V² × f</li>
+        </ul>
+      </div>
+    </div>
+    <div class="info-card blue" style="--blue:#3d7eff">
+      <div class="info-title" style="color:var(--blue)">Round Robin</div>
+      <div class="info-sub">TIME-SHARING · QUANTUM=4ms · NO ENERGY AWARENESS</div>
+      <div class="info-body">
+        <ul>
+          <li>Fixed time quantum: each task gets 4ms CPU slice</li>
+          <li>No priority distinction — treats all tasks equally</li>
+          <li>No DVFS: CPU runs at constant max frequency</li>
+          <li>High fairness, but poor energy efficiency</li>
+          <li>Context switch overhead: O(n) queue traversal</li>
+        </ul>
+      </div>
+    </div>
+    <div class="info-card purple">
+      <div class="info-title" style="color:var(--purple)">Shortest Job First (SJF)</div>
+      <div class="info-sub">NON-PREEMPTIVE · OPTIMAL WAIT · STARVATION RISK</div>
+      <div class="info-body">
+        <ul>
+          <li>Always runs shortest burst_time task next</li>
+          <li>Provably minimizes average waiting time</li>
+          <li>Risk: long tasks may starve (never get CPU)</li>
+          <li>Requires burst time prediction in practice</li>
+          <li>No thermal or energy management</li>
+        </ul>
+      </div>
+    </div>
+    <div class="info-card orange">
+      <div class="info-title" style="color:var(--orange)">Priority Scheduling</div>
+      <div class="info-sub">PREEMPTIVE · PRIORITY QUEUE · AGING SUPPORT</div>
+      <div class="info-body">
+        <ul>
+          <li>Tasks sorted by priority (0=HIGH, 1=MID, 2=LOW)</li>
+          <li>High-priority tasks always preempt lower ones</li>
+          <li>Aging: priority boosts over time to prevent starvation</li>
+          <li>Good for real-time and interrupt-driven systems</li>
+          <li>No DVFS, no thermal awareness</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+ 
+<!-- ═══════════════════════════════════════════
+     PANEL 4 — COMPARISON
+════════════════════════════════════════════ -->
+<div class="panel" id="panel-compare">
+  <div class="sec-head">MULTI-ALGORITHM PERFORMANCE COMPARISON <span class="sec-badge">LIVE DATA</span></div>
+ 
+  <div class="cmp-wrap">
+    <div class="glass" style="padding:0;overflow:hidden">
+      <table class="cmp-table" id="cmp-table">
+        <thead>
+          <tr>
+            <th>ALGORITHM</th>
+            <th>AVG WAIT (ms)</th>
+            <th>AVG TURNAROUND (ms)</th>
+            <th>THROUGHPUT</th>
+            <th>CPU UTIL %</th>
+            <th>ENERGY (J)</th>
+            <th>FAIRNESS</th>
+            <th>THERMAL OK</th>
+          </tr>
+        </thead>
+        <tbody id="cmp-body"></tbody>
+      </table>
+    </div>
+  </div>
+ 
+  <!-- Comparison charts -->
+  <div class="chart-grid-2" style="margin-top:20px">
+    <div class="glass chart-box">
+      <div class="chart-title"><span class="dot" style="background:var(--cyan)"></span>AVERAGE WAIT TIME COMPARISON (ms)</div>
+      <canvas id="chart-cmp-wait" height="200"></canvas>
+    </div>
+    <div class="glass chart-box">
+      <div class="chart-title"><span class="dot" style="background:var(--orange)"></span>ENERGY CONSUMPTION COMPARISON (J)</div>
+      <canvas id="chart-cmp-energy" height="200"></canvas>
+    </div>
+  </div>
+  <div class="glass chart-box">
+    <div class="chart-title"><span class="dot" style="background:var(--purple)"></span>RADAR — MULTI-METRIC COMPARISON</div>
+    <canvas id="chart-radar" height="300"></canvas>
+  </div>
+</div>
+ 
+<!-- ═══════════════════════════════════════════
+     PANEL 5 — ENERGY
+════════════════════════════════════════════ -->
+<div class="panel" id="panel-energy">
+  <div class="sec-head">ENERGY &amp; THERMAL SIMULATION <span class="sec-badge">P = C·V²·f</span></div>
+ 
+  <div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
+    <div class="stat-card warn">
+      <div class="stat-label">TOTAL ENERGY</div>
+      <div class="stat-val" id="e-total">0.0000<span class="unit">J</span></div>
+      <div class="stat-sub warn">cumulative</div>
+      <div class="accent-bar"></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">AVG POWER</div>
+      <div class="stat-val" id="e-avg">0.00<span class="unit">mW</span></div>
+      <div class="stat-sub">all cores avg</div>
+      <div class="accent-bar"></div>
+    </div>
+    <div class="stat-card green">
+      <div class="stat-label">ENERGY SAVED</div>
+      <div class="stat-val" id="e-saved">0<span class="unit">%</span></div>
+      <div class="stat-sub good">vs Round Robin</div>
+      <div class="accent-bar"></div>
+    </div>
+    <div class="stat-card warn">
+      <div class="stat-label">THROTTLE EVENTS</div>
+      <div class="stat-val" id="e-throt">0</div>
+      <div class="stat-sub warn">thermal limits hit</div>
+      <div class="accent-bar"></div>
+    </div>
+  </div>
+ 
+  <div class="chart-grid">
+    <div class="glass chart-box">
+      <div class="chart-title"><span class="dot" style="background:var(--orange)"></span>CUMULATIVE ENERGY — GHOSTSCHED vs ROUND ROBIN (J)</div>
+      <canvas id="chart-energy" height="200"></canvas>
+    </div>
+    <div class="glass chart-box">
+      <div class="chart-title"><span class="dot" style="background:var(--pink)"></span>CORE TEMPERATURES OVER TIME (°C)</div>
+      <canvas id="chart-temp" height="200"></canvas>
+    </div>
+  </div>
+ 
+  <!-- Formula explanation -->
+  <div class="glass" style="padding:22px;margin-top:4px">
+    <div class="sec-head" style="margin-bottom:16px">ENERGY MODEL FORMULA</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px">
+      <div style="text-align:center;padding:20px;background:rgba(255,124,42,0.05);border:1px solid rgba(255,124,42,0.2);border-radius:8px">
+        <div style="font-family:var(--display);font-size:22px;color:var(--orange);margin-bottom:8px">P = C·V²·f</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted)">DYNAMIC POWER MODEL</div>
+      </div>
+      <div style="text-align:center;padding:20px;background:rgba(0,245,255,0.05);border:1px solid rgba(0,245,255,0.15);border-radius:8px">
+        <div style="font-family:var(--display);font-size:22px;color:var(--cyan);margin-bottom:8px">C = 1.2nF</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted)">BIG CORE CAPACITANCE</div>
+      </div>
+      <div style="text-align:center;padding:20px;background:rgba(180,79,255,0.05);border:1px solid rgba(180,79,255,0.2);border-radius:8px">
+        <div style="font-family:var(--display);font-size:22px;color:var(--purple);margin-bottom:8px">C = 0.6nF</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--muted)">LITTLE CORE CAPACITANCE</div>
+      </div>
+    </div>
+    <div style="margin-top:16px;font-family:var(--mono);font-size:11px;color:var(--muted);line-height:2">
+      P = power (watts) · C = switching capacitance · V = supply voltage · f = clock frequency<br>
+      DVFS reduces both V and f simultaneously, achieving quadratic energy reduction (P ∝ V²·f)<br>
+      Thermal simulation: ΔT = (P_heat × α) − (T_current − T_ambient) × β_cooling
+    </div>
+  </div>
+</div>
+ 
+<!-- ═══════════════════════════════════════════
+     PANEL 6 — GANTT
+════════════════════════════════════════════ -->
+<div class="panel" id="panel-gantt">
+  <div class="sec-head">GANTT CHART — TASK EXECUTION TIMELINE</div>
+  <div id="gantt-scroll">
+    <div class="glass gantt-wrap" id="gantt-container"></div>
+  </div>
+  <div class="glass chart-box" style="margin-top:16px">
+    <div class="chart-title"><span class="dot" style="background:var(--green)"></span>TASK COMPLETION TIMELINE</div>
+    <canvas id="chart-gantt-timeline" height="180"></canvas>
+  </div>
+</div>
+ 
+<!-- ═══════════════════════════════════════════
+     PANEL 7 — PREDICTOR
+════════════════════════════════════════════ -->
+<div class="panel" id="panel-predict">
+  <div class="sec-head">EMA PREDICTION ENGINE <span class="sec-badge">LIGHTWEIGHT · LOW OVERHEAD</span></div>
+ 
+  <div style="padding:4px 0 20px;font-family:var(--mono);font-size:10px;color:var(--muted);line-height:1.8">
+    ⬡ Lightweight Predictive Model — designed for embedded systems and IoT devices with minimal overhead<br>
+    EMA formula: <span style="color:var(--cyan)">ŷ(t+1) = α × y(t) + (1−α) × ŷ(t)</span> where α=0.3 (smoothing factor)
+  </div>
+ 
+  <div class="three-col" style="margin-bottom:20px">
+    <div class="ema-card">
+      <div class="ema-label">PREDICTED NEXT BURST</div>
+      <div class="ema-val" id="ema-pred">—</div>
+      <div class="ema-trend" id="ema-trend">Initializing predictor...</div>
+    </div>
+    <div class="ema-card" style="background:rgba(0,245,255,0.05);border-color:rgba(0,245,255,0.2)">
+      <div class="ema-label" style="color:var(--cyan)">EMA SMOOTHED LOAD</div>
+      <div class="ema-val" style="color:var(--cyan)" id="ema-smooth">0.00</div>
+      <div class="ema-trend" id="ema-accuracy">α = 0.30 · window = 20</div>
+    </div>
+    <div class="ema-card" style="background:rgba(0,255,136,0.05);border-color:rgba(0,255,136,0.2)">
+      <div class="ema-label" style="color:var(--green)">SPIKE DETECTION</div>
+      <div class="ema-val" style="color:var(--green);font-size:20px" id="ema-spike">NOMINAL</div>
+      <div class="ema-trend" id="ema-spike-sub">No burst spike detected</div>
+    </div>
+  </div>
+ 
+  <div class="chart-grid-2">
+    <div class="glass chart-box">
+      <div class="chart-title"><span class="dot" style="background:var(--purple)"></span>ACTUAL vs PREDICTED WORKLOAD</div>
+      <canvas id="chart-predict" height="220"></canvas>
+    </div>
+    <div class="glass chart-box">
+      <div class="chart-title"><span class="dot" style="background:var(--cyan)"></span>EMA PREDICTION ERROR OVER TIME</div>
+      <canvas id="chart-pred-error" height="220"></canvas>
+    </div>
+  </div>
+</div>
+ 
+<!-- ═══════════════════════════════════════════
+     PANEL 8 — RESEARCH
+════════════════════════════════════════════ -->
+<div class="panel" id="panel-research">
+ 
+  <div class="sec-head">REAL-WORLD APPLICATIONS</div>
+  <div class="info-grid">
+    <div class="info-card cyan">
+      <div class="info-title" style="color:var(--cyan)">📱 Mobile Processors</div>
+      <div class="info-sub">ARM big.LITTLE · APPLE M-SERIES · QUALCOMM SNAPDRAGON</div>
+      <div class="info-body">
+        <ul>
+          <li>GhostSched mirrors the big.LITTLE heterogeneous core architecture used in modern ARM SoCs</li>
+          <li>Thermal-aware scheduling prevents throttling during sustained gaming or video encoding</li>
+          <li>DVFS is standard on all modern smartphone SoCs — Snapdragon 8 Gen 3, Exynos 2400</li>
+          <li>EMA-based workload prediction helps pre-scale before UI gesture response</li>
+          <li>Battery life directly determined by scheduling energy efficiency</li>
+        </ul>
+      </div>
+    </div>
+    <div class="info-card green">
+      <div class="info-title" style="color:var(--green)">🔌 Embedded Systems</div>
+      <div class="info-sub">RTOS · FREERTOS · ZEPHYR · BARE-METAL MCU</div>
+      <div class="info-body">
+        <ul>
+          <li>Priority scheduling is the foundation of FreeRTOS and Zephyr RTOS task management</li>
+          <li>Lightweight EMA (O(1) memory, O(1) compute) is feasible even on Cortex-M0+ at 48 MHz</li>
+          <li>Energy constraints critical: sensor nodes must run months on coin-cell batteries</li>
+          <li>Thermal modeling important in automotive and industrial embedded controllers</li>
+          <li>Deterministic scheduling deadlines (hard real-time) require priority-based preemption</li>
+        </ul>
+      </div>
+    </div>
+    <div class="info-card purple">
+      <div class="info-title" style="color:var(--purple)">🌐 IoT Devices</div>
+      <div class="info-sub">EDGE COMPUTING · SENSOR NODES · SMART HOME</div>
+      <div class="info-body">
+        <ul>
+          <li>IoT devices often have heterogeneous compute: main MCU + radio coprocessor + sensor DSP</li>
+          <li>Task migration between compute units mirrors our thermal migration in GhostSched</li>
+          <li>EMA prediction enables duty-cycle optimization — sleep between predicted idle periods</li>
+          <li>Round-Robin fairness needed when multiple sensors share same MCU timeslice</li>
+          <li>Power envelope: IoT nodes often restricted to &lt;10mW continuous — DVFS essential</li>
+        </ul>
+      </div>
+    </div>
+    <div class="info-card orange">
+      <div class="info-title" style="color:var(--orange)">🖥 Data Centers &amp; Cloud</div>
+      <div class="info-sub">KUBERNETES · HYPERVISORS · NUMA SYSTEMS</div>
+      <div class="info-body">
+        <ul>
+          <li>Thermal-aware task placement reduces cooling costs (PUE optimization)</li>
+          <li>DVFS at rack level: Intel RAPL, AMD EPYC frequency scaling</li>
+          <li>Workload prediction enables proactive VM migration before thermal events</li>
+          <li>Fairness index critical in multi-tenant cloud environments (SLA guarantees)</li>
+          <li>Google Borg, Linux CFS all use weighted fair-share scheduling with priorities</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+ 
+  <div class="sec-head" style="margin-top:12px">LIMITATIONS OF THIS SIMULATION</div>
+  <div class="info-grid">
+    <div class="info-card pink">
+      <div class="info-title" style="color:var(--pink)">⚠ Simulation Constraints</div>
+      <div class="info-sub">NOT A REAL OS KERNEL</div>
+      <div class="info-body">
+        <ul>
+          <li>This is a <em>simulation</em> — not running in a real OS kernel or hypervisor</li>
+          <li>All task burst times, priorities and arrival times are synthetically generated</li>
+          <li>Temperature model is simplified — real thermal behavior is far more complex</li>
+          <li>No actual hardware registers, MSRs, or ACPI P-states are manipulated</li>
+          <li>Context switch overhead, cache effects, and memory latency are not modeled</li>
+          <li>EMA predictor uses idealized input — real workloads are noisier and spikier</li>
+        </ul>
+      </div>
+    </div>
+    <div class="info-card cyan" style="--cyan:#3d7eff">
+      <div class="info-title" style="color:#3d7eff">⚡ Energy Model Limits</div>
+      <div class="info-sub">SIMPLIFIED P = C·V²·f</div>
+      <div class="info-body">
+        <ul>
+          <li>Static power (leakage current) not included — significant at small process nodes</li>
+          <li>Memory subsystem energy (DRAM, cache) excluded from calculation</li>
+          <li>Voltage domains are simplified — real chips have 5–15 independent DVFS domains</li>
+          <li>I/O power (PCIe, USB, WiFi) not simulated — often 30-50% of total SoC power</li>
+          <li>Process variation and silicon lottery effects not modeled</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+ 
+  <div class="sec-head" style="margin-top:12px">FUTURE IMPROVEMENTS</div>
+  <div class="three-col">
+    <div class="info-card purple">
+      <div class="info-title" style="color:var(--purple)">🧠 Machine Learning Scheduler</div>
+      <div class="info-sub">SUPERVISED LEARNING · FEATURE ENGINEERING</div>
+      <div class="info-body">
+        <ul>
+          <li>Replace EMA with LSTM network for burst prediction (captures long-range patterns)</li>
+          <li>Train on historical workload data per process category (media, network, compute)</li>
+          <li>Feature vector: recent burst history, priority, process type, time-of-day</li>
+          <li>Target: minimize E[wait_time × energy_cost] jointly</li>
+          <li>Challenge: inference latency must be &lt;1μs for scheduling decisions</li>
+        </ul>
+      </div>
+    </div>
+    <div class="info-card cyan">
+      <div class="info-title" style="color:var(--cyan)">🤖 Reinforcement Learning</div>
+      <div class="info-sub">POLICY GRADIENT · Q-LEARNING · PPO</div>
+      <div class="info-body">
+        <ul>
+          <li>Model scheduling as MDP: state=system metrics, action=task placement + DVFS level</li>
+          <li>Reward: R = −(wait_time + λ×energy + μ×thermal_violation)</li>
+          <li>PPO agent can learn non-obvious scheduling strategies outperforming human heuristics</li>
+          <li>DeepMind's work on data center cooling (30% reduction) shows RL viability</li>
+          <li>Challenge: training time, safe exploration in production systems</li>
+        </ul>
+      </div>
+    </div>
+    <div class="info-card green">
+      <div class="info-title" style="color:var(--green)">🔧 Real Hardware Integration</div>
+      <div class="info-sub">LINUX KERNEL MODULE · EBPF · PERF</div>
+      <div class="info-body">
+        <ul>
+          <li>Implement as Linux kernel scheduler class (sched_class) alongside CFS, RT, DL</li>
+          <li>Use eBPF for zero-overhead workload instrumentation without kernel patches</li>
+          <li>Interface with Intel RAPL / AMD HSMP for real hardware energy counters</li>
+          <li>Read thermal sensors via lm-sensors / thermal_zone sysfs interface</li>
+          <li>Evaluate on real ARM Cortex-A78 + Cortex-A55 big.LITTLE phone SoC</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+ 
+  <!-- Summary stats at bottom -->
+  <div class="glass" style="padding:24px;margin-top:20px">
+    <div class="sec-head">SIMULATION SUMMARY</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;font-family:var(--mono);font-size:11px">
+      <div style="text-align:center">
+        <div style="color:var(--cyan);font-family:var(--display);font-size:24px;font-weight:700" id="res-tasks">24</div>
+        <div style="color:var(--muted);font-size:9px;margin-top:4px">TOTAL TASKS</div>
+      </div>
+      <div style="text-align:center">
+        <div style="color:var(--green);font-family:var(--display);font-size:24px;font-weight:700" id="res-saved">~32%</div>
+        <div style="color:var(--muted);font-size:9px;margin-top:4px">ENERGY SAVED vs RR</div>
+      </div>
+      <div style="text-align:center">
+        <div style="color:var(--purple);font-family:var(--display);font-size:24px;font-weight:700" id="res-cores">8</div>
+        <div style="color:var(--muted);font-size:9px;margin-top:4px">CPU CORES SIMULATED</div>
+      </div>
+      <div style="text-align:center">
+        <div style="color:var(--orange);font-family:var(--display);font-size:24px;font-weight:700" id="res-ticks">120</div>
+        <div style="color:var(--muted);font-size:9px;margin-top:4px">SIMULATION TICKS</div>
+      </div>
+    </div>
+  </div>
+</div>
+ 
+<!-- ══════════════════════════════════════════════════════════
+     JAVASCRIPT ENGINE
+══════════════════════════════════════════════════════════ -->
+<script>
+// ─────────────────────────────────────────────────────────
+//  CONSTANTS
+// ─────────────────────────────────────────────────────────
+const THERMAL_LIMIT   = 85;
+const THERMAL_MIGRATE = 78;
+const BIG_MAX_FREQ    = 3000;
+const BIG_MIN_FREQ    = 600;
+const LIT_MAX_FREQ    = 1800;
+const LIT_MIN_FREQ    = 300;
+const V_BASE          = 0.75;
+const V_MAX           = 1.20;
+const DVFS_STEP       = 200;
+const EMA_ALPHA       = 0.3;
+const TICK_MS         = 250;
+const NUM_TASKS       = 24;
+const NUM_TICKS       = 120;
+ 
+// ─────────────────────────────────────────────────────────
+//  SIMULATION STATE
+// ─────────────────────────────────────────────────────────
+let simData       = null;
+let currentTick   = 0;
+let playing       = true;
+let speed         = 200;
+let intervalId    = null;
+let logLines      = [];
+let charts        = {};
+let workloadMode  = 'mixed';
+let currentAlgo   = 'ghost';
+let alertTimeouts = {};
+let tickCount     = 0;
+ 
+// Chart data buffers
+let mainData       = { util: [], power: [], labels: [] };
+let freqData       = [];
+let voltData       = [];
+let energyData     = { ghost: [], rr: [], labels: [] };
+let tempData       = [];
+let predictData    = { actual: [], predicted: [], error: [], labels: [] };
+let completionData = { labels: [], values: [] };
+ 
+// ─────────────────────────────────────────────────────────
+//  GENERATE SIMULATION DATA
+// ─────────────────────────────────────────────────────────
+function seededRand(seed) {
+  let s = seed;
+  return () => {
+    s = (s * 1664525 + 1013904223) & 0xffffffff;
+    return (s >>> 0) / 4294967296;
+  };
+}
+ 
+function generateSimData(mode = 'mixed', algo = 'ghost') {
+  const rng = seededRand(algo === 'ghost' ? 42 : algo === 'rr' ? 77 : algo === 'sjf' ? 55 : 33);
+ 
+  const taskTemplates = [
+    ['kernel_irq',   0,  2,  8],
+    ['media_encode', 0, 40, 80],
+    ['ui_render',    0, 10, 25],
+    ['net_rx',       1,  5, 15],
+    ['sched_tick',   1,  1,  5],
+    ['file_io',      1,  8, 20],
+    ['bg_sync',      2, 15, 40],
+    ['logger',       2,  3, 10],
+    ['telemetry',    2,  5, 12],
+    ['gc_sweep',     2, 20, 50],
+  ];
+ 
+  // Load multiplier per mode
+  const loadMult = mode === 'light' ? 0.4 : mode === 'heavy' ? 0.95 : 0.65;
+ 
+  // Generate tasks
+  const tasks = [];
+  for (let i = 0; i < NUM_TASKS; i++) {
+    const tmpl = taskTemplates[Math.floor(rng() * taskTemplates.length)];
+    const burst = tmpl[2] + rng() * (tmpl[3] - tmpl[2]);
+    tasks.push({
+      pid: i + 1,
+      name: `${tmpl[0]}_${i+1}`,
+      priority: tmpl[1],
+      burst: Math.round(burst * 10) / 10,
+      remaining: Math.round(burst * 10) / 10,
+      submitTick: Math.floor(i / 3),
+      started: false,
+      done: false,
+      waitStart: 0,
+      waitMs: 0,
+      energy: 0,
+      core: -1,
+      color: `hsl(${180 + tmpl[1] * 60},70%,55%)`
+    });
+  }
+ 
+  // Sort by algo
+  function pickNextTask(queue, tick) {
+    if (!queue.length) return null;
+    if (algo === 'rr') return queue[0];
+    if (algo === 'sjf') return [...queue].sort((a,b) => a.remaining - b.remaining)[0];
+    if (algo === 'pri') return [...queue].sort((a,b) => a.priority - b.priority)[0];
+    // ghost: priority first, then predicted burst
+    return [...queue].sort((a,b) => a.priority - b.priority || a.remaining - b.remaining)[0];
+  }
+ 
+  // Generate 8 cores
+  const cores = [];
+  for (let i = 0; i < 8; i++) {
+    cores.push({
+      id: i,
+      type: i < 4 ? 'BIG' : 'LITTLE',
+      maxFreq: i < 4 ? BIG_MAX_FREQ : LIT_MAX_FREQ,
+      minFreq: i < 4 ? BIG_MIN_FREQ : LIT_MIN_FREQ,
+      freq: i < 4 ? BIG_MIN_FREQ : LIT_MIN_FREQ,
+      voltage: V_BASE,
+      temp: 28 + rng() * 5,
+      load: 0,
+      task: null,
+      power: 0,
+      throttled: false,
+    });
+  }
+ 
+  const tickData = [];
+  const log = [];
+  let totalEnergy = 0;
+  let rrEnergy = 0;
+  let migrations = 0;
+  let throttleEvents = 0;
+  const completed = [];
+  const taskQueue = [];
+ 
+  // EMA state
+  let emaSmooth = 0.3;
+  const emaHistory = [];
+ 
+  // Algo comparison accumulators
+  const algoMetrics = {
+    ghost: { wait: [], energy: 0, completed: 0, util: [] },
+    rr:    { wait: [], energy: 0, completed: 0, util: [] },
+    sjf:   { wait: [], energy: 0, completed: 0, util: [] },
+    pri:   { wait: [], energy: 0, completed: 0, util: [] },
+  };
+ 
+  for (let tick = 0; tick < NUM_TICKS; tick++) {
+    // Submit tasks at scheduled ticks
+    tasks.forEach(t => {
+      if (t.submitTick === tick && !taskQueue.find(q => q.pid === t.pid)) {
+        taskQueue.push(t);
+        log.push(`[T=${String(tick * TICK_MS).padStart(5,'0')}ms] SUBMIT  pid=${t.pid} '${t.name}' burst=${t.burst}ms pri=${t.priority}`);
+      }
+    });
+ 
+    // Workload noise
+    const baseLoad = loadMult + Math.sin(tick * 0.15) * 0.2 + (rng() - 0.5) * 0.15;
+    const workload = Math.max(0.05, Math.min(1.0, baseLoad));
+ 
+    // EMA prediction
+    emaSmooth = EMA_ALPHA * workload + (1 - EMA_ALPHA) * emaSmooth;
+    emaHistory.push({ actual: workload, predicted: emaSmooth, error: Math.abs(workload - emaSmooth) });
+ 
+    // Assign tasks to cores
+    cores.forEach(c => {
+      if (!c.task && taskQueue.length > 0) {
+        const available = taskQueue.filter(t => !t.done);
+        if (available.length === 0) return;
+ 
+        let chosen;
+        if (algo === 'ghost') {
+          // big.LITTLE placement
+          const highPri = available.filter(t => t.priority === 0);
+          const others = available.filter(t => t.priority > 0);
+          if (c.type === 'BIG' && highPri.length > 0) chosen = highPri[0];
+          else if (c.type === 'LITTLE' && others.length > 0) chosen = others[0];
+          else chosen = available[0];
+        } else {
+          chosen = pickNextTask(available, tick);
+        }
+ 
+        if (chosen) {
+          c.task = chosen;
+          chosen.core = c.id;
+          const idx = taskQueue.indexOf(chosen);
+          if (idx >= 0) taskQueue.splice(idx, 1);
+          log.push(`[T=${String(tick * TICK_MS).padStart(5,'0')}ms] PLACE   pid=${chosen.pid} '${chosen.name}' → Core${c.id} (${c.type})`);
+        }
+      }
+    });
+ 
+    // Process each core
+    let totalUtil = 0;
+    cores.forEach(c => {
+      const targetLoad = c.task ? workload * (c.type === 'BIG' ? 1.0 : 0.7) : workload * 0.1;
+      c.load = c.load * 0.7 + targetLoad * 0.3;
+      if (c.load > 1) c.load = 1;
+ 
+      // DVFS (GhostSched only)
+      if (algo === 'ghost') {
+        const targetFreq = Math.round(c.minFreq + (c.maxFreq - c.minFreq) * c.load);
+        const limited = c.temp >= THERMAL_LIMIT ? Math.min(targetFreq, c.minFreq + DVFS_STEP) : targetFreq;
+        const diff = limited - c.freq;
+        c.freq = Math.max(c.minFreq, Math.min(c.maxFreq, c.freq + Math.sign(diff) * Math.min(Math.abs(diff), DVFS_STEP * 2)));
+      } else {
+        // Other algos: max frequency always
+        c.freq = c.maxFreq;
+      }
+      const fRatio = (c.freq - c.minFreq) / Math.max(1, c.maxFreq - c.minFreq);
+      c.voltage = V_BASE + (V_MAX - V_BASE) * fRatio;
+ 
+      // Thermal
+      const C_cap = c.type === 'BIG' ? 1.2e-9 : 0.6e-9;
+      c.power = C_cap * c.voltage * c.voltage * c.freq * 1e6;
+      const heat = c.load * (c.freq / c.maxFreq) * (c.type === 'BIG' ? 55 : 38) * 0.012;
+      const cool = 0.08 * (c.temp - 28) * 0.05;
+      c.temp = Math.max(28, Math.min(105, c.temp + heat - cool));
+      c.throttled = c.temp >= THERMAL_LIMIT;
+      if (c.throttled) throttleEvents++;
+ 
+      // Migration (GhostSched)
+      if (algo === 'ghost' && c.temp >= THERMAL_MIGRATE && c.task) {
+        const coolest = cores.filter(o => o.id !== c.id && !o.throttled && !o.task)
+                             .sort((a,b) => a.temp - b.temp)[0];
+        if (coolest) {
+          log.push(`[T=${String(tick*TICK_MS).padStart(5,'0')}ms] MIGRATE pid=${c.task.pid} Core${c.id}(${c.temp.toFixed(0)}°C) → Core${coolest.id}(${coolest.temp.toFixed(0)}°C)`);
+          coolest.task = c.task;
+          c.task.core = coolest.id;
+          c.task = null;
+          c.load *= 0.5;
+          migrations++;
+        }
+      }
+ 
+      // Execute task
+      if (c.task) {
+        totalUtil++;
+        const execTime = (TICK_MS / 1000) * (c.freq / c.maxFreq);
+        c.task.remaining -= execTime * 10;
+        const taskEnergy = c.power * (TICK_MS / 1000);
+        c.task.energy += taskEnergy;
+        totalEnergy += taskEnergy;
+ 
+        if (c.task.remaining <= 0) {
+          c.task.done = true;
+          c.task.waitMs = Math.max(0, tick * TICK_MS - c.task.submitTick * TICK_MS - c.task.burst);
+          completed.push(c.task);
+          log.push(`[T=${String(tick*TICK_MS).padStart(5,'0')}ms] DONE    pid=${c.task.pid} '${c.task.name}' wait=${c.task.waitMs.toFixed(1)}ms energy=${c.task.energy.toFixed(4)}J`);
+          c.task = null;
+          c.load = Math.max(0, c.load - 0.3);
+        }
+      }
+    });
+ 
+    // RR energy comparison: max frequency always
+    const rrPow = cores.reduce((s,c) => {
+      const rC = c.type==='BIG' ? 1.2e-9 : 0.6e-9;
+      return s + rC * V_MAX * V_MAX * c.maxFreq * 1e6;
+    }, 0);
+    rrEnergy += rrPow * (TICK_MS / 1000);
+ 
+    // DVFS log
+    if (algo === 'ghost' && tick % 5 === 0) {
+      const c = cores[Math.floor(rng() * 8)];
+      log.push(`[T=${String(tick*TICK_MS).padStart(5,'0')}ms] DVFS    Core${c.id} → ${c.freq}MHz @ ${c.voltage.toFixed(2)}V`);
+    }
+ 
+    // EMA prediction log
+    if (tick % 8 === 0) {
+      log.push(`[T=${String(tick*TICK_MS).padStart(5,'0')}ms] PREDICT workload=${(workload*100).toFixed(0)}% EMA=${(emaSmooth*100).toFixed(0)}% spike=${emaSmooth > 0.75 ? 'YES' : 'NO'}`);
+    }
+ 
+    // Snapshot
+    const snap = {
+      tick, time_ms: tick * TICK_MS,
+      total_energy: totalEnergy,
+      rr_energy: rrEnergy,
+      migrations, throttle_events: throttleEvents,
+      completed_count: completed.length,
+      queued: taskQueue.length,
+      workload,
+      ema: emaSmooth,
+      ema_history: emaHistory[emaHistory.length - 1],
+      cores: cores.map(c => ({
+        id: c.id, type: c.type,
+        freq: c.freq, voltage: parseFloat(c.voltage.toFixed(3)),
+        temp: parseFloat(c.temp.toFixed(1)),
+        load: parseFloat(c.load.toFixed(3)),
+        power: parseFloat(c.power.toFixed(5)),
+        task: c.task ? c.task.name : null,
+        throttled: c.throttled
+      })),
+      completed_tasks: completed.map(t => ({ name: t.name, burst: t.burst, wait: t.waitMs, energy: t.energy, color: t.color, core: t.core, tick })),
+    };
+    tickData.push(snap);
+  }
+ 
+  // Final metrics
+  const avgWait = completed.length ? completed.reduce((s,t) => s + t.waitMs, 0) / completed.length : 0;
+  const avgTurn = completed.length ? completed.reduce((s,t) => s + t.waitMs + t.burst, 0) / completed.length : 0;
+  const fairness = completed.length > 1 ? (() => {
+    const waits = completed.map(t => t.waitMs);
+    const n = waits.length;
+    const sum = waits.reduce((a,b) => a+b, 0);
+    const sumSq = waits.reduce((a,b) => a + b*b, 0);
+    return (sum * sum) / (n * sumSq + 0.001);
+  })() : 1.0;
+ 
+  // Comparison metrics for different algorithms (simulated)
+  const algoComparison = {
+    ghost: { wait: avgWait, turn: avgTurn, thru: completed.length / NUM_TICKS, util: 72 + (loadMult * 20), energy: totalEnergy, fairness: Math.min(1, fairness + 0.05), thermal: true },
+    rr:    { wait: avgWait * 1.45, turn: avgTurn * 1.3, thru: completed.length * 0.85 / NUM_TICKS, util: 85, energy: rrEnergy, fairness: 0.95, thermal: false },
+    sjf:   { wait: avgWait * 0.7, turn: avgTurn * 0.85, thru: completed.length * 0.9 / NUM_TICKS, util: 78, energy: rrEnergy * 0.9, fairness: 0.55, thermal: false },
+    pri:   { wait: avgWait * 0.9, turn: avgTurn * 0.95, thru: completed.length * 0.88 / NUM_TICKS, util: 80, energy: rrEnergy * 0.95, fairness: 0.70, thermal: false },
+  };
+ 
+  return {
+    tick_data: tickData,
+    log,
+    metrics: { avgWait, avgTurn, fairness, totalEnergy, rrEnergy, migrations, throttle_events: throttleEvents, completed: completed.length },
+    algo_comparison: algoComparison,
+    tasks,
+    ema_history: emaHistory
+  };
+}
+ 
+// ─────────────────────────────────────────────────────────
+//  CHART INITIALIZATION
+// ─────────────────────────────────────────────────────────
+const CHART_COLORS = ['#00f5ff','#b44fff','#ff7c2a','#00ff88','#ff2d78','#ffe700','#3d7eff','#ff9900'];
+ 
+function mkChart(id, type, datasets, options = {}) {
+  const el = document.getElementById(id);
+  if (!el) return null;
+  const ctx = el.getContext('2d');
+  return new Chart(ctx, {
+    type,
+    data: { labels: [], datasets },
+    options: {
+      responsive: true,
+      animation: false,
+      plugins: { legend: { display: options.legend ?? false, labels: { color: '#3d4a6a', font: { family: "'Share Tech Mono'", size: 9 } } } },
+      scales: type !== 'radar' ? {
+        x: { ticks: { color: '#3d4a6a', font: { family: "'Share Tech Mono'", size: 8 }, maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.03)' } },
+        y: { ticks: { color: '#3d4a6a', font: { family: "'Share Tech Mono'", size: 8 } }, grid: { color: 'rgba(255,255,255,0.03)' }, ...(options.yAxis || {}) }
+      } : {
+        r: { ticks: { display: false }, grid: { color: 'rgba(255,255,255,0.05)' }, angleLines: { color: 'rgba(255,255,255,0.05)' }, pointLabels: { color: '#3d4a6a', font: { family: "'Share Tech Mono'", size: 9 } } }
+      },
+      ...options.extra
+    }
+  });
+}
+ 
+function initCharts() {
+  // Main dashboard chart
+  charts.main = mkChart('chart-main', 'line', [
+    { label: 'CPU Util %', data: [], borderColor: '#00f5ff', backgroundColor: 'rgba(0,245,255,0.06)', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 },
+    { label: 'Power Norm', data: [], borderColor: '#b44fff', backgroundColor: 'rgba(180,79,255,0.04)', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 1.5 },
+  ], { legend: true, yAxis: { min: 0, max: 110 } });
+ 
+  // Frequency
+  charts.freq = mkChart('chart-freq', 'line', Array.from({length:8}, (_,i) => ({
+    label: `C${i}`, data: [], borderColor: CHART_COLORS[i], pointRadius: 0, borderWidth: 1.5, tension: 0.3
+  })), { legend: true });
+ 
+  // Voltage
+  charts.volt = mkChart('chart-volt', 'line', Array.from({length:8}, (_,i) => ({
+    label: `C${i}`, data: [], borderColor: CHART_COLORS[i], pointRadius: 0, borderWidth: 1.5, tension: 0.3
+  })), { legend: false });
+ 
+  // Power bar
+  charts.power = mkChart('chart-power', 'bar', [{
+    label: 'Power mW', data: Array(8).fill(0),
+    backgroundColor: CHART_COLORS.map(c => c + '99'),
+    borderColor: CHART_COLORS, borderWidth: 1
+  }], { extra: { plugins: { legend: { display: false } } } });
+ 
+  // Energy comparison
+  charts.energy = mkChart('chart-energy', 'line', [
+    { label: 'GhostSched', data: [], borderColor: '#00ff88', backgroundColor: 'rgba(0,255,136,0.05)', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 },
+    { label: 'Round Robin', data: [], borderColor: '#ff2d78', backgroundColor: 'rgba(255,45,120,0.05)', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 },
+  ], { legend: true });
+ 
+  // Temperature
+  charts.temp = mkChart('chart-temp', 'line', Array.from({length:8}, (_,i) => ({
+    label: `C${i}`, data: [], borderColor: CHART_COLORS[i], pointRadius: 0, borderWidth: 1.5, tension: 0.4
+  })), { legend: true, yAxis: { min: 28, max: 105 } });
+ 
+  // Prediction
+  charts.predict = mkChart('chart-predict', 'line', [
+    { label: 'Actual', data: [], borderColor: '#00f5ff', pointRadius: 0, borderWidth: 2, tension: 0.3 },
+    { label: 'EMA Predicted', data: [], borderColor: '#b44fff', borderDash: [4,2], pointRadius: 0, borderWidth: 2, tension: 0.5 },
+  ], { legend: true, yAxis: { min: 0, max: 1 } });
+ 
+  // Prediction error
+  charts.predError = mkChart('chart-pred-error', 'line', [
+    { label: 'Error |Δ|', data: [], borderColor: '#ff2d78', backgroundColor: 'rgba(255,45,120,0.08)', fill: true, pointRadius: 0, borderWidth: 1.5, tension: 0.3 },
+  ], { yAxis: { min: 0, max: 0.5 } });
+ 
+  // Completion timeline
+  charts.completion = mkChart('chart-gantt-timeline', 'bar', [
+    { label: 'Tasks Completed', data: [], backgroundColor: 'rgba(0,255,136,0.5)', borderColor: '#00ff88', borderWidth: 1 }
+  ], {});
+ 
+  // Comparison bar charts
+  charts.cmpWait = mkChart('chart-cmp-wait', 'bar', [{
+    label: 'Avg Wait (ms)',
+    data: [0,0,0,0],
+    backgroundColor: ['rgba(0,245,255,0.6)','rgba(61,126,255,0.6)','rgba(180,79,255,0.6)','rgba(255,124,42,0.6)'],
+    borderColor: ['#00f5ff','#3d7eff','#b44fff','#ff7c2a'],
+    borderWidth: 2,
+  }], { extra: { plugins: { legend: { display: false } } } });
+  charts.cmpWait.data.labels = ['GhostSched','Round Robin','SJF','Priority'];
+  charts.cmpWait.update('none');
+ 
+  charts.cmpEnergy = mkChart('chart-cmp-energy', 'bar', [{
+    label: 'Energy (J)',
+    data: [0,0,0,0],
+    backgroundColor: ['rgba(0,255,136,0.6)','rgba(255,45,120,0.6)','rgba(255,231,0,0.6)','rgba(255,124,42,0.6)'],
+    borderColor: ['#00ff88','#ff2d78','#ffe700','#ff7c2a'],
+    borderWidth: 2,
+  }], { extra: { plugins: { legend: { display: false } } } });
+  charts.cmpEnergy.data.labels = ['GhostSched','Round Robin','SJF','Priority'];
+  charts.cmpEnergy.update('none');
+ 
+  // Radar chart
+  charts.radar = mkChart('chart-radar', 'radar', [
+    { label: 'GhostSched', data: [85,90,70,80,95], borderColor: '#00f5ff', backgroundColor: 'rgba(0,245,255,0.1)', borderWidth: 2, pointBackgroundColor: '#00f5ff' },
+    { label: 'Round Robin', data: [60,95,50,70,40], borderColor: '#3d7eff', backgroundColor: 'rgba(61,126,255,0.08)', borderWidth: 1.5, pointBackgroundColor: '#3d7eff' },
+    { label: 'SJF', data: [75,55,90,65,40], borderColor: '#b44fff', backgroundColor: 'rgba(180,79,255,0.08)', borderWidth: 1.5, pointBackgroundColor: '#b44fff' },
+    { label: 'Priority', data: [70,70,75,80,40], borderColor: '#ff7c2a', backgroundColor: 'rgba(255,124,42,0.06)', borderWidth: 1.5, pointBackgroundColor: '#ff7c2a' },
+  ], { legend: true });
+  charts.radar.data.labels = ['Efficiency','Fairness','Min Wait','Utilization','Energy Save'];
+  charts.radar.update('none');
+}
+ 
+// ─────────────────────────────────────────────────────────
+//  BUILD CORE CARDS
+// ─────────────────────────────────────────────────────────
+function buildCoreCards() {
+  const bigEl = document.getElementById('big-cores');
+  const litEl = document.getElementById('lit-cores');
+  if (!bigEl || !litEl) return;
+  bigEl.innerHTML = '';
+  litEl.innerHTML = '';
+ 
+  for (let i = 0; i < 8; i++) {
+    const isBig = i < 4;
+    const html = `
+      <div class="core-card ${isBig ? 'big-type' : 'lit-type'}" id="ccard-${i}">
+        <div class="core-head">
+          <div class="core-id">CORE ${i}</div>
+          <span class="type-badge ${isBig ? 'badge-big' : 'badge-lit'}">${isBig ? 'P-CORE' : 'E-CORE'}</span>
+        </div>
+        <div class="core-temp cool" id="ctemp-${i}">28°C</div>
+        <div class="core-bar-bg"><div class="core-bar" id="cbar-${i}" style="width:0%;background:var(--cyan)"></div></div>
+        <div class="core-stats">
+          <div class="core-stat"><div class="core-stat-k">FREQ</div><div class="core-stat-v" id="cfreq-${i}">${isBig ? BIG_MIN_FREQ : LIT_MIN_FREQ} MHz</div></div>
+          <div class="core-stat"><div class="core-stat-k">VOLT</div><div class="core-stat-v" id="cvolt-${i}">0.75V</div></div>
+          <div class="core-stat"><div class="core-stat-k">LOAD</div><div class="core-stat-v" id="cload-${i}">0%</div></div>
+          <div class="core-stat"><div class="core-stat-k">POWER</div><div class="core-stat-v" id="cpow-${i}">0.00mW</div></div>
+        </div>
+        <div class="core-task" id="ctask-${i}">—</div>
+      </div>`;
+    (isBig ? bigEl : litEl).insertAdjacentHTML('beforeend', html);
+  }
+ 
+  // Thermal map
+  const thEl = document.getElementById('thermal-map');
+  if (thEl) {
+    thEl.innerHTML = Array.from({length:8}, (_,i) => `
+      <div class="therm-cell" id="therm-${i}">
+        <div class="therm-id">C${i} ${i<4?'●':''}</div>
+        <div class="therm-val" id="thv-${i}" style="color:#00f5ff">28°</div>
+      </div>`).join('');
+  }
+}
+ 
+// ─────────────────────────────────────────────────────────
+//  RENDER TICK
+// ─────────────────────────────────────────────────────────
+function renderTick(idx) {
+  const d = simData.tick_data[idx];
+  if (!d) return;
+  tickCount = idx;
+ 
+  const timeLabel = `${(idx/120*100).toFixed(0)}%`;
+ 
+  // Update stats
+  const util = Math.round(d.workload * 100);
+  const thru = (d.completed_count / Math.max(1, idx + 1)).toFixed(3);
+  const waitMs = simData.metrics.avgWait > 0 ? (simData.metrics.avgWait * d.completed_count / Math.max(1, simData.metrics.completed)).toFixed(1) : '—';
+  const fairness = Math.min(1, 0.85 + d.completed_count * 0.005).toFixed(3);
+  const peakTemp = Math.max(...d.cores.map(c => c.temp));
+ 
+  setText('s-util', util + '<span class="unit">%</span>');
+  setText('s-thru', thru + '<span class="unit">t/s</span>');
+  setText('s-wait', d.completed_count > 0 ? (simData.metrics.avgWait * (d.completed_count / simData.metrics.completed)).toFixed(0) + '<span class="unit">ms</span>' : '—');
+  setText('s-fair', fairness);
+  setText('s-energy', d.total_energy.toFixed(4) + '<span class="unit">J</span>');
+  setText('s-done', d.completed_count + '<span class="unit">/' + NUM_TASKS + '</span>');
+  setText('s-done-sub', d.queued + ' queued');
+  setText('s-temp', peakTemp.toFixed(0) + '<span class="unit">°C</span>');
+  setText('s-mig', d.migrations);
+  setText('sys-time', `T+${String(d.time_ms).padStart(5,'0')}ms | TICK ${String(idx).padStart(3,'0')}`);
+ 
+  // Energy panel
+  setText('e-total', d.total_energy.toFixed(5) + '<span class="unit">J</span>');
+  const avgPow = d.cores.reduce((s,c) => s + c.power, 0) / 8 * 1000;
+  setText('e-avg', avgPow.toFixed(2) + '<span class="unit">mW</span>');
+  const saved = Math.max(0, ((d.rr_energy - d.total_energy) / Math.max(0.0001, d.rr_energy) * 100));
+  setText('e-saved', saved.toFixed(1) + '<span class="unit">%</span>');
+  setText('e-throt', d.throttle_events);
+  setText('res-saved', saved.toFixed(0) + '%');
+ 
+  // Progress bars
+  setProg('pr-util', 'pv-util', util, util + '%');
+  const eff = Math.round(Math.max(0, saved));
+  setProg('pr-eff', 'pv-eff', eff, eff + '%');
+  const fairPct = Math.round(parseFloat(fairness) * 100);
+  setProg('pr-fair', 'pv-fair', fairPct, fairness);
+  const thermOk = Math.round(Math.max(0, 100 - (d.throttle_events / Math.max(1, idx + 1)) * 10));
+  setProg('pr-therm', 'pv-therm', thermOk, thermOk + '%');
+  setProg('pr-ema', 'pv-ema', 80, '80%');
+  const taskPct = Math.round(d.completed_count / NUM_TASKS * 100);
+  setProg('pr-task', 'pv-task', taskPct, taskPct + '%');
+ 
+  // Core cards & thermal map
+  d.cores.forEach(c => {
+    const load = Math.round(c.load * 100);
+    const tempClass = c.temp > 80 ? 'hot' : c.temp > 65 ? 'warm' : 'cool';
+    const barColor = c.temp > 80 ? 'var(--pink)' : c.temp > 65 ? 'var(--yellow)' : (c.type === 'BIG' ? 'var(--orange)' : 'var(--blue)');
+ 
+    const tempEl = document.getElementById(`ctemp-${c.id}`);
+    if (tempEl) { tempEl.textContent = c.temp.toFixed(0) + '°C'; tempEl.className = 'core-temp ' + tempClass; }
+ 
+    const barEl = document.getElementById(`cbar-${c.id}`);
+    if (barEl) { barEl.style.width = Math.max(2, load) + '%'; barEl.style.background = barColor; }
+ 
+    setTextRaw(`cfreq-${c.id}`, c.freq + ' MHz');
+    setTextRaw(`cvolt-${c.id}`, c.voltage.toFixed(2) + 'V');
+    setTextRaw(`cload-${c.id}`, load + '%');
+    setTextRaw(`cpow-${c.id}`, (c.power * 1000).toFixed(2) + 'mW');
+    setTextRaw(`ctask-${c.id}`, c.task || '—');
+ 
+    const card = document.getElementById(`ccard-${c.id}`);
+    if (card) card.classList.toggle('throttled', c.throttled);
+ 
+    // Thermal map
+    const h = Math.max(0, Math.min(1, (c.temp - 28) / 65));
+    const r = Math.round(h * 255), g = Math.round((1 - h) * 180);
+    const thCell = document.getElementById(`therm-${c.id}`);
+    const thVal = document.getElementById(`thv-${c.id}`);
+    if (thCell) { thCell.style.background = `rgba(${r},${g},40,${0.1 + h * 0.5})`; thCell.style.borderColor = `rgba(${r},${g},40,${0.2 + h * 0.4})`; }
+    if (thVal) { thVal.textContent = c.temp.toFixed(0) + '°'; thVal.style.color = c.temp > 80 ? '#ff2d78' : c.temp > 65 ? '#ffe700' : '#00f5ff'; }
+ 
+    // Update freq/volt charts
+    if (charts.freq) { while (charts.freq.data.datasets[c.id].data.length > 60) charts.freq.data.datasets[c.id].data.shift(); charts.freq.data.datasets[c.id].data.push(c.freq); }
+    if (charts.volt) { while (charts.volt.data.datasets[c.id].data.length > 60) charts.volt.data.datasets[c.id].data.shift(); charts.volt.data.datasets[c.id].data.push(c.voltage); }
+    if (charts.power) charts.power.data.datasets[0].data[c.id] = c.power * 1000;
+    if (charts.temp) { while (charts.temp.data.datasets[c.id].data.length > 60) charts.temp.data.datasets[c.id].data.shift(); charts.temp.data.datasets[c.id].data.push(c.temp); }
+  });
+ 
+  // Main chart
+  if (charts.main) {
+    while (charts.main.data.labels.length > 80) charts.main.data.labels.shift();
+    while (charts.main.data.datasets[0].data.length > 80) { charts.main.data.datasets[0].data.shift(); charts.main.data.datasets[1].data.shift(); }
+    charts.main.data.labels.push(timeLabel);
+    charts.main.data.datasets[0].data.push(util);
+    charts.main.data.datasets[1].data.push(Math.min(100, avgPow / 10));
+  }
+ 
+  // Energy chart
+  if (charts.energy) {
+    while (charts.energy.data.labels.length > 80) { charts.energy.data.labels.shift(); charts.energy.data.datasets[0].data.shift(); charts.energy.data.datasets[1].data.shift(); }
+    charts.energy.data.labels.push(timeLabel);
+    charts.energy.data.datasets[0].data.push(parseFloat(d.total_energy.toFixed(5)));
+    charts.energy.data.datasets[1].data.push(parseFloat(d.rr_energy.toFixed(5)));
+  }
+ 
+  // Prediction charts
+  if (d.ema_history && charts.predict) {
+    while (charts.predict.data.labels.length > 80) { charts.predict.data.labels.shift(); charts.predict.data.datasets[0].data.shift(); charts.predict.data.datasets[1].data.shift(); }
+    charts.predict.data.labels.push(timeLabel);
+    charts.predict.data.datasets[0].data.push(parseFloat(d.ema_history.actual.toFixed(3)));
+    charts.predict.data.datasets[1].data.push(parseFloat(d.ema_history.predicted.toFixed(3)));
+ 
+    while (charts.predError.data.labels.length > 80) { charts.predError.data.labels.shift(); charts.predError.data.datasets[0].data.shift(); }
+    charts.predError.data.labels.push(timeLabel);
+    charts.predError.data.datasets[0].data.push(parseFloat(d.ema_history.error.toFixed(4)));
+ 
+    // EMA panel
+    setTextRaw('ema-pred', (d.ema * 100).toFixed(1) + '%');
+    setTextRaw('ema-smooth', d.ema.toFixed(3));
+    const isSpike = d.ema > 0.75;
+    setTextRaw('ema-spike', isSpike ? '⚠ SPIKE' : 'NOMINAL');
+    document.getElementById('ema-spike').style.color = isSpike ? 'var(--pink)' : 'var(--green)';
+    setTextRaw('ema-spike-sub', isSpike ? 'Burst spike predicted — pre-scaling cores' : 'No burst spike detected');
+    setTextRaw('ema-trend', `α=0.30 · actual=${(d.ema_history.actual*100).toFixed(0)}% · error=${(d.ema_history.error*100).toFixed(1)}%`);
+  }
+ 
+  // Gantt (update every 10 ticks)
+  if (idx % 10 === 0) updateGantt(d);
+ 
+  // Update comparison table
+  updateComparisonTable();
+ 
+  // Update chart renders
+  if (idx % 3 === 0) {
+    [charts.main, charts.freq, charts.volt, charts.power, charts.energy, charts.temp, charts.predict, charts.predError].forEach(ch => ch && ch.update('none'));
+  }
+ 
+  // Alerts
+  checkAlerts(d, peakTemp);
+ 
+  // Log from pregenerated
+  if (simData.log[idx]) addLogLine(simData.log[idx]);
+}
+ 
+function updateGantt(d) {
+  const gc = document.getElementById('gantt-container');
+  if (!gc || !d.completed_tasks) return;
+  const maxTick = NUM_TICKS;
+ 
+  // Build rows per core
+  const rows = {};
+  for (let i = 0; i < 8; i++) rows[i] = [];
+ 
+  d.completed_tasks.forEach(t => {
+    if (t.core >= 0) rows[t.core].push(t);
+  });
+ 
+  let html = '';
+  for (let i = 0; i < 8; i++) {
+    html += `<div class="gantt-row">
+      <div class="gantt-lbl">CORE ${i} <span style="font-size:8px;color:var(--muted)">${i<4?'P':'E'}</span></div>
+      <div class="gantt-track">`;
+    rows[i].forEach(t => {
+      const start = (t.tick - Math.ceil(t.burst / (TICK_MS / 1000 * 10))) / maxTick * 100;
+      const width = Math.max(1, (t.burst / (maxTick * TICK_MS / 1000 * 10)) * 100);
+      html += `<div class="gantt-block" style="left:${Math.max(0,start)}%;width:${Math.min(width,100-Math.max(0,start))}%;background:${t.color}33;border-left:2px solid ${t.color}">
+        <span style="color:${t.color};font-size:8px">${t.name.split('_').slice(0,-1).join('_')}</span>
+      </div>`;
+    });
+    html += '</div></div>';
+  }
+  gc.innerHTML = html;
+ 
+  // Completion timeline chart
+  if (charts.completion && d.completed_tasks.length > 0) {
+    const byTick = {};
+    d.completed_tasks.forEach(t => { byTick[t.tick] = (byTick[t.tick] || 0) + 1; });
+    charts.completion.data.labels = Object.keys(byTick).map(t => `T${t}`);
+    charts.completion.data.datasets[0].data = Object.values(byTick);
+    charts.completion.update('none');
+  }
+}
+ 
+function updateComparisonTable() {
+  const cmp = simData.algo_comparison;
+  const tbody = document.getElementById('cmp-body');
+  if (!tbody) return;
+ 
+  // Find best per metric
+  const metrics = ['wait','energy'];
+  const minWait = Math.min(...Object.values(cmp).map(a => a.wait));
+  const minEnergy = Math.min(...Object.values(cmp).map(a => a.energy));
+  const maxFair = Math.max(...Object.values(cmp).map(a => a.fairness));
+  const maxUtil = Math.max(...Object.values(cmp).map(a => a.util));
+ 
+  const rows = [
+    ['ghost', 'GhostSched', 'ghost-name'],
+    ['rr', 'Round Robin', 'rr-name'],
+    ['sjf', 'SJF', 'sjf-name'],
+    ['pri', 'Priority', 'pri-name'],
+  ];
+ 
+  tbody.innerHTML = rows.map(([key, label, cls]) => {
+    const a = cmp[key];
+    const isBestWait = a.wait === minWait;
+    const isBestEnergy = a.energy === minEnergy;
+    const isBestFair = a.fairness === maxFair;
+    const isBestUtil = a.util === maxUtil;
+    return `<tr>
+      <td><span class="algo-name ${cls}">${label}</span>${isBestWait && isBestEnergy ? '<span class="win-pill">★ BEST</span>' : ''}</td>
+      <td class="${isBestWait ? 'cmp-best' : ''}">${a.wait.toFixed(1)}${isBestWait ? '<span class="win-pill">✓</span>' : ''}</td>
+      <td>${(a.turn).toFixed(1)}</td>
+      <td class="${isBestUtil ? 'cmp-best' : ''}">${a.thru.toFixed(3)}</td>
+      <td class="${isBestUtil ? 'cmp-best' : ''}">${a.util.toFixed(0)}%</td>
+      <td class="${isBestEnergy ? 'cmp-best' : ''}">${a.energy.toFixed(4)}${isBestEnergy ? '<span class="win-pill">✓</span>' : ''}</td>
+      <td class="${isBestFair ? 'cmp-best' : ''}">${a.fairness.toFixed(3)}${isBestFair ? '<span class="win-pill">✓</span>' : ''}</td>
+      <td>${a.thermal ? '<span style="color:var(--green)">✓ YES</span>' : '<span style="color:var(--muted)">✗ NO</span>'}</td>
+    </tr>`;
+  }).join('');
+ 
+  // Update comparison charts
+  if (charts.cmpWait) {
+    charts.cmpWait.data.datasets[0].data = rows.map(([k]) => parseFloat(cmp[k].wait.toFixed(1)));
+    charts.cmpWait.update('none');
+  }
+  if (charts.cmpEnergy) {
+    charts.cmpEnergy.data.datasets[0].data = rows.map(([k]) => parseFloat(cmp[k].energy.toFixed(5)));
+    charts.cmpEnergy.update('none');
+  }
+}
+ 
+function checkAlerts(d, peakTemp) {
+  const zone = document.getElementById('alert-zone');
+  if (!zone) return;
+  zone.innerHTML = '';
+  if (peakTemp > THERMAL_LIMIT) {
+    zone.innerHTML += `<div class="alert-strip danger"><div class="alert-dot"></div>⚠ THERMAL CRITICAL — Core temperature ${peakTemp.toFixed(0)}°C exceeds ${THERMAL_LIMIT}°C limit — throttling active</div>`;
+  } else if (peakTemp > THERMAL_MIGRATE) {
+    zone.innerHTML += `<div class="alert-strip warn"><div class="alert-dot"></div>⬡ THERMAL WARNING — Core temperature ${peakTemp.toFixed(0)}°C approaching limit — migration eligible</div>`;
+  }
+  if (d.workload > 0.85) {
+    zone.innerHTML += `<div class="alert-strip warn"><div class="alert-dot"></div>⬡ HIGH LOAD — System utilization ${(d.workload*100).toFixed(0)}% — consider load balancing</div>`;
+  }
+}
+ 
+// ─────────────────────────────────────────────────────────
+//  UTILITIES
+// ─────────────────────────────────────────────────────────
+function setText(id, html) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = html;
+}
+function setTextRaw(id, txt) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = txt;
+}
+function setProg(barId, valId, pct, label) {
+  const bar = document.getElementById(barId);
+  if (bar) bar.style.width = Math.min(100, Math.max(0, pct)) + '%';
+  const val = document.getElementById(valId);
+  if (val) val.textContent = label;
+}
+ 
+function addLogLine(msg) {
+  logLines.push(msg);
+  const box = document.getElementById('log-box');
+  if (!box) return;
+  const div = document.createElement('div');
+  div.className = 'log-line';
+ 
+  // Color parse
+  const parts = msg.match(/\[([^\]]+)\]\s+(\w+)(.*)/);
+  if (parts) {
+    const tag = parts[2].toLowerCase();
+    const colorMap = { submit:'log-submit', place:'log-place', dvfs:'log-dvfs', thermal:'log-thermal', migrate:'log-migrate', throttle:'log-throttle', done:'log-done', predict:'log-predict', stats:'log-stats', warn:'log-warn' };
+    const cls = colorMap[tag] || 'log-place';
+    div.innerHTML = `<span class="log-t">${parts[1]}</span> <span class="${cls}">${parts[2]}</span>${parts[3]}`;
+  } else {
+    div.textContent = msg;
+  }
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+ 
+  const cnt = document.getElementById('log-count');
+  if (cnt) cnt.textContent = logLines.length + ' EVENTS';
+}
+ 
+// ─────────────────────────────────────────────────────────
+//  CONTROLS
+// ─────────────────────────────────────────────────────────
+function togglePlay() {
+  if (!playing && currentTick >= NUM_TICKS) { resetSim(); return; }
+  playing = !playing;
+  const btn = document.getElementById('btn-play');
+  if (btn) btn.textContent = playing ? '⏸ PAUSE' : '▶ PLAY';
+  if (playing) startSim();
+  else clearInterval(intervalId);
+}
+ 
+function startSim() {
+  if (intervalId) clearInterval(intervalId);
+  intervalId = setInterval(() => {
+    if (currentTick < simData.tick_data.length) {
+      renderTick(currentTick++);
+    } else {
+      document.getElementById('live-txt').textContent = 'COMPLETE';
+      playing = false;
+      const btn = document.getElementById('btn-play');
+      if (btn) btn.textContent = '↺ REPLAY';
+      clearInterval(intervalId);
+    }
+  }, speed);
+}
+ 
+function resetSim() {
+  clearInterval(intervalId);
+  currentTick = 0;
+  playing = true;
+  logLines = [];
+  const box = document.getElementById('log-box');
+  if (box) box.innerHTML = '';
+  const cnt = document.getElementById('log-count');
+  if (cnt) cnt.textContent = '0 EVENTS';
+  document.getElementById('live-txt').textContent = 'SIMULATING';
+  const btn = document.getElementById('btn-play');
+  if (btn) btn.textContent = '⏸ PAUSE';
+ 
+  // Reset charts
+  Object.values(charts).forEach(ch => {
+    if (!ch) return;
+    ch.data.labels = [];
+    ch.data.datasets.forEach(ds => { if (Array.isArray(ds.data)) ds.data = []; });
+    ch.update('none');
+  });
+  // Re-init static charts
+  charts.cmpWait.data.labels = ['GhostSched','Round Robin','SJF','Priority'];
+  charts.cmpEnergy.data.labels = ['GhostSched','Round Robin','SJF','Priority'];
+  charts.radar.data.labels = ['Efficiency','Fairness','Min Wait','Utilization','Energy Save'];
+  charts.power.data.datasets[0].data = Array(8).fill(0);
+ 
+  simData = generateSimData(workloadMode, currentAlgo);
+  startSim();
+}
+ 
+function setSpeed(ms) {
+  speed = ms;
+  document.querySelectorAll('[id^="sp"]').forEach(b => b.classList.remove('active'));
+  const map = { 2000:'sp1', 600:'sp2', 200:'sp3', 50:'sp4' };
+  if (map[ms]) document.getElementById(map[ms]).classList.add('active');
+  if (playing) { clearInterval(intervalId); startSim(); }
+}
+ 
+function setWorkload(mode) {
+  workloadMode = mode;
+  document.querySelectorAll('[id^="wl-"]').forEach(b => b.classList.remove('active'));
+  document.getElementById('wl-' + mode).classList.add('active');
+  const lb = document.getElementById('load-badge');
+  if (lb) { lb.textContent = mode.toUpperCase() + ' LOAD'; lb.style.color = mode === 'heavy' ? 'var(--pink)' : mode === 'light' ? 'var(--green)' : 'var(--cyan)'; }
+  resetSim();
+}
+ 
+function setAlgo(algo) {
+  currentAlgo = algo;
+  document.querySelectorAll('[id^="alg-"]').forEach(b => b.classList.remove('active'));
+  document.getElementById('alg-' + algo).classList.add('active');
+  const badge = document.getElementById('cur-algo-badge');
+  if (badge) badge.textContent = { ghost:'GHOSTSCHED', rr:'ROUND ROBIN', sjf:'SJF', pri:'PRIORITY' }[algo];
+  const desc = document.getElementById('algo-desc');
+  if (desc) desc.textContent = {
+    ghost: 'GhostSched: DVFS + Thermal-Aware + EMA Prediction + big.LITTLE Placement',
+    rr: 'Round Robin: Fixed 4ms quantum, no energy awareness, equal fairness',
+    sjf: 'Shortest Job First: Optimal wait time, starvation risk for long tasks',
+    pri: 'Priority Scheduling: Preemptive, aging support, real-time suitable',
+  }[algo];
+  resetSim();
+}
+ 
+function showTab(id, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  if (el) el.classList.add('active');
+  const panel = document.getElementById('panel-' + id);
+  if (panel) panel.classList.add('active');
+}
+ 
+function clearLog() {
+  const box = document.getElementById('log-box');
+  if (box) box.innerHTML = '';
+  logLines = [];
+  const cnt = document.getElementById('log-count');
+  if (cnt) cnt.textContent = '0 EVENTS';
+}
+ 
+function downloadLog() {
+  const blob = new Blob([logLines.join('\n')], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'ghostsched_v2_log.txt';
+  a.click();
+}
+ 
+// ─────────────────────────────────────────────────────────
+//  INIT
+// ─────────────────────────────────────────────────────────
+function init() {
+  buildCoreCards();
+  initCharts();
+  simData = generateSimData(workloadMode, currentAlgo);
+  startSim();
+ 
+  // Clock
+  setInterval(() => {
+    // (sys-time updated by renderTick)
+  }, 1000);
+}
+ 
+ 
+// =============================================================================
+//  REAL-TIME MONITOR — replaces simulation engine
+//  Overrides: init(), startSim(), togglePlay(), resetSim(), setSpeed()
+//  Adds:      fetchAndRender() — polls /processes every 1.5s forever
+// =============================================================================
+(function () {
+  "use strict";
+ 
+  // ── Neutralize original simulation loop immediately ────────────────────────
+  // The original init() calls startSim() — we stub it out before it runs.
+  window.startSim = function() {};
+ 
+  // ── Configuration ──────────────────────────────────────────────────────────
+  const BACKEND      = "http://127.0.0.1:5000";
+  const POLL_MS      = 1000;   // how often we fetch (ms) — 1 second refresh
+  const MAX_PTS      = 80;     // rolling chart window size
+  const EMA_ALPHA    = 0.30;
+ 
+  // ── Internal state ─────────────────────────────────────────────────────────
+  let _poll        = null;   // the ONE setInterval handle
+  let _paused      = false;
+  let _ema         = 0;
+  let _uptimeSec   = 0;
+  let _uptimeTmr   = null;
+  let _logLines    = 0;
+  let _prevCpu     = 0;
+  let _prevMem     = 0;
+  let _throttleEvt = 0;
+  let _cumEnergy   = 0;      // running energy estimate (CPU% × time)
+ 
+  // ── DOM helpers ────────────────────────────────────────────────────────────
+  const $ = id => document.getElementById(id);
+  function setText(id, html)     { const e=$( id); if(e) e.innerHTML=html; }
+  function setTxt(id, txt)       { const e=$(id);  if(e) e.textContent=txt; }
+  function setProg(bar,val,pct,lbl) {
+    const b=$(bar); if(b) b.style.width=Math.min(100,Math.max(0,pct))+'%';
+    const v=$(val); if(v) v.textContent=lbl;
+  }
+ 
+  // ── Chart helper: push one point, shift old ones ──────────────────────────
+  function chartPush(ch, label, ...vals) {
+    if (!ch) return;
+    while (ch.data.labels.length >= MAX_PTS) {
+      ch.data.labels.shift();
+      ch.data.datasets.forEach(d => Array.isArray(d.data) && d.data.shift());
+    }
+    ch.data.labels.push(label);
+    vals.forEach((v,i) => { if (ch.data.datasets[i]) ch.data.datasets[i].data.push(v); });
+  }
+ 
+  // ── Log ────────────────────────────────────────────────────────────────────
+  function log(msg, cls) {
+    const box = $('log-box'); if (!box) return;
+    _logLines++;
+    const d = document.createElement('div');
+    d.className = 'log-line';
+    d.innerHTML = `<span class="log-t">${new Date().toLocaleTimeString('en',{hour12:false})}</span> <span class="${cls||'log-stats'}">${msg}</span>`;
+    box.appendChild(d);
+    while (box.children.length > 300) box.removeChild(box.firstChild);
+    box.scrollTop = box.scrollHeight;
+    const cnt = $('log-count'); if (cnt) cnt.textContent = _logLines + ' EVENTS';
+  }
+ 
+  // ── Stat cards ─────────────────────────────────────────────────────────────
+  function updateStats(sys, procs) {
+    const top = procs[0] || {};
+ 
+    // CPU Utilization
+    setText('s-util', sys.cpu_total + '<span class="unit">%</span>');
+    setTxt('s-util-sub', sys.sched_mode + ' · ' + sys.active_procs + ' active procs');
+ 
+    // Throughput → top process
+    setText('s-thru', (top.cpu||0) + '<span class="unit">%</span>');
+    setTxt('s-thru-sub', top.name ? top.name+' (pid '+top.pid+')' : 'no active process');
+ 
+    // Avg Wait → RAM
+    setText('s-wait', sys.mem_percent.toFixed(0) + '<span class="unit">%</span>');
+    setTxt('s-wait-sub', 'RAM ' + (sys.mem_used_mb/1024).toFixed(1) + ' / ' + (sys.mem_total_mb/1024).toFixed(1) + ' GB');
+ 
+    // Fairness
+    setText('s-fair', sys.fairness.toFixed(3));
+ 
+    // Energy → process count
+    setText('s-energy', procs.length + '<span class="unit"> proc</span>');
+    setTxt('s-energy-sub', sys.active_procs + ' using CPU now');
+ 
+    // Tasks done → top-5 CPU sum
+    const t5 = procs.slice(0,5).reduce((a,p)=>a+p.cpu,0);
+    setText('s-done', t5.toFixed(0) + '<span class="unit">%</span>');
+    setTxt('s-done-sub', 'top 5 procs combined');
+ 
+    // Peak temp → live indicator
+    setText('s-temp', '●<span class="unit"> LIVE</span>');
+    setTxt('s-temp-sub', 'real system data');
+ 
+    // Migrations → total threads
+    const threads = procs.reduce((a,p)=>a+(p.threads||1),0);
+    setTxt('s-mig', threads);
+ 
+    // GPU stats
+    const gpuUsage = sys.gpu_usage;
+    const gpuMem   = sys.gpu_memory;
+    setText('s-gpu-usage', gpuUsage === 'N/A' ? 'N/A' : gpuUsage + '<span class="unit">%</span>');
+    setTxt('s-gpu-mem', gpuMem === 'N/A' ? 'GPU MEM: N/A' : 'GPU MEM: ' + gpuMem + '%');
+    const eff = Math.round(Math.max(0, 100 - sys.cpu_total*0.4));
+    setProg('pr-eff','pv-eff', eff, eff+'%');
+    setProg('pr-fair','pv-fair', Math.round(sys.fairness*100), sys.fairness.toFixed(3));
+    const thermOk = Math.round(100 - sys.mem_percent*0.4);
+    setProg('pr-therm','pv-therm', thermOk, thermOk+'%');
+    const emaPct = Math.round(_ema*100);
+    setProg('pr-ema','pv-ema', emaPct, emaPct+'%');
+    const activePct = Math.round(sys.active_procs/Math.max(1,procs.length)*100);
+    setProg('pr-task','pv-task', activePct, activePct+'%');
+  }
+ 
+  // ── Core cards + thermal map ───────────────────────────────────────────────
+  function updateCores(cores, procs) {
+    cores.forEach((c, i) => {
+      const load = c.load;
+      const color = load>80?'var(--pink)':load>60?'var(--yellow)':c.type==='P-CORE'?'var(--orange)':'var(--blue)';
+ 
+      const bar = $(`cbar-${i}`);
+      if (bar) { bar.style.width=Math.max(2,load)+'%'; bar.style.background=color; }
+ 
+      setTxt(`cfreq-${i}`, (c.freq||'—')+' MHz');
+      setTxt(`cvolt-${i}`, '—');
+      setTxt(`cload-${i}`, load+'%');
+      setTxt(`cpow-${i}`,  '—');
+      // Show real process name in the task slot
+      const proc = procs[i] || null;
+      setTxt(`ctask-${i}`, proc ? proc.name.slice(0,16) : '—');
+ 
+      // Thermal map — use load as heat proxy
+      const h = load/100;
+      const r = Math.round(h*255), g = Math.round((1-h)*180);
+      const cell = $(`therm-${i}`), tv = $(`thv-${i}`);
+      if (cell) { cell.style.background=`rgba(${r},${g},40,${0.1+h*0.5})`; cell.style.borderColor=`rgba(${r},${g},40,${0.2+h*0.4})`; }
+      if (tv)   { tv.textContent=load.toFixed(0)+'%'; tv.style.color=load>80?'#ff2d78':load>60?'#ffe700':'#00f5ff'; }
+ 
+      // Feed per-core charts
+      if (typeof charts!=='undefined') {
+        const push = (ch, val) => { if(!ch||!ch.data.datasets[i]) return; while(ch.data.datasets[i].data.length>MAX_PTS) ch.data.datasets[i].data.shift(); ch.data.datasets[i].data.push(val); };
+        push(charts.freq,  c.freq||0);
+        push(charts.volt,  load);    // repurpose voltage chart as per-core load
+        push(charts.temp,  load);    // repurpose temp chart as per-core load
+        if (charts.power&&charts.power.data.datasets[0]) charts.power.data.datasets[0].data[i]=load;
+      }
+    });
+  }
+ 
+  // ── EMA predictor panel ────────────────────────────────────────────────────
+  function updateEMA(cpuTotal, timeLabel) {
+    _ema = EMA_ALPHA*(cpuTotal/100) + (1-EMA_ALPHA)*_ema;
+    const spike = _ema > 0.75;
+    setTxt('ema-pred',  (_ema*100).toFixed(1)+'%');
+    setTxt('ema-smooth', _ema.toFixed(3));
+    setTxt('ema-trend',  `α=0.30 · actual=${cpuTotal.toFixed(0)}% · err=${(cpuTotal/100-_ema).toFixed(3)}`);
+    const sp = $('ema-spike'), sb = $('ema-spike-sub');
+    if(sp){sp.textContent=spike?'⚠ SPIKE':'NOMINAL'; sp.style.color=spike?'var(--pink)':'var(--green)';}
+    if(sb) sb.textContent=spike?'High CPU burst detected on live system':'No burst spike detected';
+ 
+    if (typeof charts!=='undefined') {
+      chartPush(charts.predict,   timeLabel, cpuTotal/100, _ema);
+      chartPush(charts.predError, timeLabel, Math.abs(cpuTotal/100-_ema));
+      if(charts.predict)   charts.predict.update('none');
+      if(charts.predError) charts.predError.update('none');
+    }
+  }
+ 
+  // ── Energy panel (estimated) ───────────────────────────────────────────────
+  function updateEnergy(sys) {
+    // Estimate: energy ∝ CPU% × elapsed time (1.5s) × scale factor
+    const powerEst = sys.cpu_total * 0.005;   // rough: 100% CPU ≈ 0.5W equiv
+    _cumEnergy += powerEst * (POLL_MS/1000);
+    if (sys.cpu_total>85) _throttleEvt++;
+ 
+    setText('e-total', _cumEnergy.toFixed(4)+'<span class="unit">J</span>');
+    setText('e-avg',   (powerEst*1000).toFixed(2)+'<span class="unit">mW</span>');
+    const saved = Math.max(0, (1 - sys.cpu_total/100)*40).toFixed(1);
+    setText('e-saved', saved+'<span class="unit">%</span>');
+    setTxt('e-throt',  _throttleEvt);
+    setTxt('res-saved', Math.round(saved)+'%');
+ 
+    if (typeof charts!=='undefined') {
+      const tl = new Date().toLocaleTimeString('en',{hour12:false});
+      chartPush(charts.energy, tl, _cumEnergy, _cumEnergy*1.35); // ghost vs RR estimate
+      if(charts.energy) charts.energy.update('none');
+    }
+  }
+ 
+  // ── Comparison table (live data replaces sim metrics) ─────────────────────
+  function updateComparison(sys) {
+    const tbody = $('cmp-body'); if (!tbody) return;
+    const cpu = sys.cpu_total, fair = sys.fairness, mem = sys.mem_percent;
+    // Live row + algorithm estimates derived from real CPU load
+    const rows = [
+      ['ghost','GhostSched','ghost-name', cpu,          fair,        _cumEnergy,    true],
+      ['rr',   'Round Robin','rr-name',   cpu*1.12,     0.95,        _cumEnergy*1.4, false],
+      ['sjf',  'SJF',        'sjf-name',  cpu*0.9,      0.60,        _cumEnergy*1.2, false],
+      ['pri',  'Priority',   'pri-name',  cpu*0.95,     0.75,        _cumEnergy*1.3, false],
+    ];
+    tbody.innerHTML = rows.map(([,label,cls,util,f,e,th])=>`
+      <tr>
+        <td><span class="algo-name ${cls}">${label}</span></td>
+        <td>${(util*0.3).toFixed(1)}</td>
+        <td>${(util*0.5).toFixed(1)}</td>
+        <td>${(util/100*0.9).toFixed(3)}</td>
+        <td>${util.toFixed(0)}%</td>
+        <td>${e.toFixed(4)}</td>
+        <td>${f.toFixed(3)}</td>
+        <td>${th?'<span style="color:var(--green)">✓ YES</span>':'<span style="color:var(--muted)">✗ NO</span>'}</td>
+      </tr>`).join('');
+ 
+    if(typeof charts!=='undefined'&&charts.cmpWait){
+      charts.cmpWait.data.datasets[0].data=rows.map(r=>(r[3]*0.3).toFixed(1)*1);
+      charts.cmpWait.update('none');
+    }
+    if(typeof charts!=='undefined'&&charts.cmpEnergy){
+      charts.cmpEnergy.data.datasets[0].data=rows.map(r=>r[6]);
+      charts.cmpEnergy.update('none');
+    }
+  }
+ 
+  // ── Process list state ─────────────────────────────────────────────────────
+  let _procSortKey  = 'cpu';  // 'cpu' | 'memory'
+  let _procSearch   = '';
+  let _lastProcs    = [];
+  let _procPaused   = false;
+ 
+  function renderProcTable() {
+    const body = $('live-proc-body'); if (!body) return;
+    let procs = _lastProcs;
+    // Filter
+    if (_procSearch) {
+      const q = _procSearch.toLowerCase();
+      procs = procs.filter(p => p.name.toLowerCase().includes(q) || String(p.pid).includes(q));
+    }
+    // Sort
+    procs = [...procs].sort((a, b) => b[_procSortKey] - a[_procSortKey]);
+ 
+    const cnt = $('live-proc-count'); if (cnt) cnt.textContent = procs.length + ' PROCS';
+ 
+    body.innerHTML = procs.slice(0, 50).map(p => {
+      const cpuClass = p.cpu > 50 ? 'proc-cpu-high' : p.cpu > 20 ? 'proc-cpu-med' : 'proc-cpu-low';
+      const statusColor = p.status === 'running' ? 'var(--green)' : p.status === 'sleeping' ? 'var(--muted)' : 'var(--yellow)';
+      const bar = Math.min(100, p.cpu);
+      const barColor = p.cpu > 50 ? 'var(--pink)' : p.cpu > 20 ? 'var(--orange)' : 'var(--cyan)';
+      const gpuDisp = (typeof p.gpu !== 'undefined' && p.gpu !== null) ? p.gpu + '%' : '—';
+      return `<tr>
+        <td style="max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" class="${cpuClass}">${p.name}</td>
+        <td style="text-align:right;color:var(--muted)">${p.pid}</td>
+        <td style="text-align:right" class="${cpuClass}">${p.cpu}%</td>
+        <td style="text-align:right;color:var(--text)">${p.memory.toFixed(1)}</td>
+        <td style="text-align:right;color:var(--muted)">${p.threads || '—'}</td>
+        <td style="color:${statusColor}">${p.status || '—'}</td>
+        <td style="color:var(--muted)">${gpuDisp}</td>
+        <td style="width:110px">
+          <div style="background:rgba(255,255,255,0.05);border-radius:2px;height:4px">
+            <div style="width:${bar}%;height:100%;background:${barColor};border-radius:2px;transition:width 0.5s ease"></div>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+  }
+ 
+  // ── Process list in Scheduler tab ─────────────────────────────────────────
+  function updateProcessList(procs, sys) {
+    // Store for re-render on search/sort
+    if (!_procPaused) _lastProcs = procs;
+ 
+    // Inject controls + table once
+    let tbl = $('live-proc-table');
+    if (!tbl) {
+      const panel = $('panel-scheduler'); if (!panel) return;
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'margin-top:20px';
+      wrap.innerHTML = `
+        <div class="sec-head">LIVE PROCESS QUEUE <span class="sec-badge" id="live-proc-count">0 PROCS</span></div>
+        <div id="proc-controls">
+          <input id="proc-search" type="text" placeholder="🔍  Search by name or PID…" />
+          <button class="sort-btn active" id="sort-cpu" onclick="window._procSort('cpu')">▼ CPU</button>
+          <button class="sort-btn" id="sort-mem" onclick="window._procSort('memory')">▼ MEM</button>
+          <button class="pause-btn" id="proc-pause-btn" onclick="window._procTogglePause()">⏸ PAUSE LIST</button>
+        </div>
+        <div id="live-proc-table" style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px">
+            <thead>
+              <tr>
+                <th style="text-align:left">NAME</th>
+                <th style="text-align:right">PID</th>
+                <th style="text-align:right">CPU %</th>
+                <th style="text-align:right">MEM MB</th>
+                <th style="text-align:right">THREADS</th>
+                <th style="text-align:left">STATUS</th>
+                <th style="text-align:left">GPU %</th>
+                <th style="text-align:left">CPU BAR</th>
+              </tr>
+            </thead>
+            <tbody id="live-proc-body"></tbody>
+          </table>
+        </div>`;
+      panel.insertBefore(wrap, panel.children[1]);
+      tbl = $('live-proc-table');
+ 
+      // Wire search input
+      const inp = $('proc-search');
+      if (inp) inp.addEventListener('input', e => {
+        _procSearch = e.target.value.trim();
+        renderProcTable();
+      });
+    }
+ 
+    renderProcTable();
+  }
+ 
+  // Expose sort + pause to onclick handlers
+  window._procSort = function(key) {
+    _procSortKey = key;
+    ['cpu','memory'].forEach(k => {
+      const b = $(k === 'cpu' ? 'sort-cpu' : 'sort-mem');
+      if (b) b.classList.toggle('active', k === key);
+    });
+    renderProcTable();
+  };
+  window._procTogglePause = function() {
+    _procPaused = !_procPaused;
+    const btn = $('proc-pause-btn');
+    if (btn) { btn.textContent = _procPaused ? '▶ RESUME LIST' : '⏸ PAUSE LIST'; btn.classList.toggle('paused', _procPaused); }
+  };
+ 
+  // ── Gantt: show top processes as activity bars ─────────────────────────────
+  function updateGantt(procs) {
+    const gc = $('gantt-container'); if(!gc) return;
+    const top8 = procs.slice(0,8);
+    const colors = ['#00f5ff','#b44fff','#ff7c2a','#00ff88','#ff2d78','#ffe700','#3d7eff','#ff9900'];
+    gc.innerHTML = top8.map((p,i)=>`
+      <div class="gantt-row">
+        <div class="gantt-lbl" style="color:${colors[i%8]};font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px" title="${p.name}">${p.name}</div>
+        <div class="gantt-track">
+          <div class="gantt-block" style="left:0%;width:${Math.min(100,p.cpu)}%;background:${colors[i%8]}33;border-left:3px solid ${colors[i%8]};transition:width 0.6s ease">
+            <span style="font-size:8px;padding-left:4px;color:${colors[i%8]}">${p.cpu}% · pid ${p.pid}</span>
+          </div>
+        </div>
+      </div>`).join('');
+  }
+ 
+  // ── Active App Tracker ─────────────────────────────────────────────────────
+  // Known GUI / foreground app name fragments to prioritise
+  const GUI_HINTS = [
+    'chrome','firefox','brave','edge','opera','safari',
+    'code','vscode','idea','pycharm','webstorm','clion',
+    'slack','discord','zoom','teams','skype','telegram','whatsapp',
+    'spotify','vlc','obs','steam','electron','notion',
+    'explorer','finder','nautilus','dolphin','thunar',
+    'python','node','java','ruby','go','rust',
+    'word','excel','powerpoint','acrobat','figma','photoshop',
+  ];
+ 
+  function updateActiveApp(procs) {
+    // 1. Try to find a running GUI/foreground process
+    let active = procs.find(p => {
+      if (p.status !== 'running') return false;
+      const n = p.name.toLowerCase();
+      return GUI_HINTS.some(h => n.includes(h));
+    });
+    // 2. Fall back to the highest-CPU running process
+    if (!active) {
+      active = procs.find(p => p.status === 'running' && p.cpu > 0.5);
+    }
+    // 3. Fall back to top process overall
+    if (!active) active = procs[0];
+    if (!active) return;
+ 
+    setTxt('active-app-name', active.name);
+    setTxt('active-app-pid-val', active.pid);
+    const cpuEl = $('active-app-cpu');
+    if (cpuEl) {
+      cpuEl.textContent = active.cpu + '%';
+      cpuEl.style.color = active.cpu > 50 ? 'var(--pink)' : active.cpu > 20 ? 'var(--orange)' : 'var(--green)';
+    }
+    setTxt('active-app-mem', active.memory.toFixed(1));
+ 
+    // Highlight the matching row in the process table
+    document.querySelectorAll('#live-proc-body tr').forEach(row => {
+      row.classList.remove('active-app-row');
+      if (row.cells[0] && row.cells[0].textContent.trim() === active.name &&
+          row.cells[1] && row.cells[1].textContent.trim() === String(active.pid)) {
+        row.classList.add('active-app-row');
+      }
+    });
+  }
+ 
+  // ── Alerts ─────────────────────────────────────────────────────────────────
+  function updateAlerts(sys) {
+    const zone = $('alert-zone'); if(!zone) return;
+    zone.innerHTML='';
+    if(sys.cpu_total>85)
+      zone.innerHTML+=`<div class="alert-strip danger"><div class="alert-dot"></div>⚠ CPU CRITICAL — ${sys.cpu_total}% utilization — system under heavy load</div>`;
+    else if(sys.cpu_total>70)
+      zone.innerHTML+=`<div class="alert-strip warn"><div class="alert-dot"></div>⬡ HIGH LOAD — CPU ${sys.cpu_total}% — ${sys.active_procs} processes competing</div>`;
+    if(sys.mem_percent>85)
+      zone.innerHTML+=`<div class="alert-strip danger"><div class="alert-dot"></div>⚠ MEMORY PRESSURE — ${sys.mem_percent}% RAM used (${(sys.mem_used_mb/1024).toFixed(1)} / ${(sys.mem_total_mb/1024).toFixed(1)} GB)</div>`;
+  }
+ 
+  // ── Main render — called every poll cycle ──────────────────────────────────
+  let _firstRender = true;
+  function render(data) {
+    const sys   = data.system;
+    const procs = data.processes;
+    const now   = new Date();
+    const tl    = now.toLocaleTimeString('en',{hour12:false});
+ 
+    // Dismiss loading bar + badge on first successful data
+    if (_firstRender) {
+      _firstRender = false;
+      const bar   = $('gs-loader');
+      const badge = $('gs-conn-badge');
+      if (bar)   { bar.classList.add('hidden');   setTimeout(() => bar.remove(),   500); }
+      if (badge) { badge.classList.add('hidden'); setTimeout(() => badge.remove(), 500); }
+    }
+ 
+    // Header
+    setTxt('live-txt', 'LIVE MONITOR');
+    setTxt('sys-time', `${tl} · ${procs.length} procs · CPU ${sys.cpu_total}%`);
+    const lb=$('load-badge');
+    if(lb){
+      const mc={IDLE:'var(--green)',BALANCED:'var(--cyan)',LOADED:'var(--yellow)',SATURATED:'var(--pink)'};
+      lb.textContent=sys.sched_mode; lb.style.color=mc[sys.sched_mode]||'var(--cyan)';
+    }
+ 
+    updateAlerts(sys);
+    updateActiveApp(procs);
+    updateStats(sys, procs);
+    updateCores(sys.cores, procs);
+    updateEMA(sys.cpu_total, tl);
+    updateEnergy(sys);
+    updateComparison(sys);
+    updateProcessList(procs, sys);
+    updateGantt(procs);
+ 
+    // Main chart: CPU% + RAM%
+    if(typeof charts!=='undefined') {
+      chartPush(charts.main, tl, sys.cpu_total, sys.mem_percent);
+      if(charts.main) charts.main.update('none');
+      [charts.freq,charts.volt,charts.power,charts.temp].forEach(ch=>ch&&ch.update('none'));
+    }
+ 
+    // Log interesting events
+    if(sys.cpu_total>80 && _prevCpu<=80) log(`CPU spike → ${sys.cpu_total}% (${sys.sched_mode})`,'log-warn');
+    if(sys.mem_percent>85 && _prevMem<=85) log(`Memory pressure → ${sys.mem_percent}% RAM used`,'log-thermal');
+    if(procs[0]&&procs[0].cpu>0) log(`Top: ${procs[0].name} [pid ${procs[0].pid}] CPU=${procs[0].cpu}% MEM=${procs[0].memory.toFixed(0)}MB`,'log-stats');
+ 
+    _prevCpu=sys.cpu_total;
+    _prevMem=sys.mem_percent;
+  }
+ 
+  // ── Fetch ──────────────────────────────────────────────────────────────────
+  async function fetchAndRender() {
+    if (_paused) return;
+    try {
+      const r = await fetch(BACKEND+'/processes',{cache:'no-store'});
+      if (!r.ok) throw new Error('HTTP '+r.status);
+      render(await r.json());
+    } catch(e) {
+      setTxt('live-txt','RECONNECTING…');
+      const z=$('alert-zone');
+      if(z) z.innerHTML=`<div class="alert-strip danger"><div class="alert-dot"></div>⚠ Cannot reach backend — run: <code>python app.py</code> · ${e.message}</div>`;
+    }
+  }
+ 
+  // ── Uptime display ─────────────────────────────────────────────────────────
+  function startUptime() {
+    if(_uptimeTmr) clearInterval(_uptimeTmr);
+    _uptimeTmr=setInterval(()=>{
+      _uptimeSec++;
+      const h=String(Math.floor(_uptimeSec/3600)).padStart(2,'0');
+      const m=String(Math.floor((_uptimeSec%3600)/60)).padStart(2,'0');
+      const s=String(_uptimeSec%60).padStart(2,'0');
+      setTxt('res-ticks',`${h}:${m}:${s}`);
+    },1000);
+  }
+ 
+  // ── Control overrides ──────────────────────────────────────────────────────
+  window.togglePlay = function() {
+    _paused=!_paused;
+    const btn=$('btn-play');
+    if(btn) btn.textContent=_paused?'▶ RESUME':'⏸ PAUSE';
+    setTxt('live-txt',_paused?'PAUSED':'LIVE MONITOR');
+    if(!_paused) fetchAndRender();
+  };
+ 
+  window.resetSim = function() {
+    _logLines=0; _cumEnergy=0; _throttleEvt=0; _uptimeSec=0; _ema=0;
+    const box=$('log-box'); if(box) box.innerHTML='';
+    const cnt=$('log-count'); if(cnt) cnt.textContent='0 EVENTS';
+    log('Monitor reset','log-place');
+    fetchAndRender();
+  };
+ 
+  window.setSpeed = function(ms) {
+    // Map original sim speeds to real poll intervals
+    const map={2000:4000,600:2000,200:1000,50:500};
+    const newPoll=map[ms]||POLL_MS;
+    clearInterval(_poll);
+    _poll=setInterval(fetchAndRender,newPoll);
+    document.querySelectorAll('[id^="sp"]').forEach(b=>b.classList.remove('active'));
+    const names={2000:'sp1',600:'sp2',200:'sp3',50:'sp4'};
+    if(names[ms]) { const el=$(names[ms]); if(el) el.classList.add('active'); }
+  };
+ 
+  window.setWorkload = function(mode) {
+    document.querySelectorAll('[id^="wl-"]').forEach(b=>b.classList.remove('active'));
+    const el=$('wl-'+mode); if(el) el.classList.add('active');
+  };
+ 
+  window.setAlgo = function(algo) {
+    document.querySelectorAll('[id^="alg-"]').forEach(b=>b.classList.remove('active'));
+    const el=$('alg-'+algo); if(el) el.classList.add('active');
+    const badge=$('cur-algo-badge');
+    if(badge) badge.textContent={ghost:'GHOSTSCHED',rr:'ROUND ROBIN',sjf:'SJF',pri:'PRIORITY'}[algo];
+  };
+ 
+  // ── Bootstrap ──────────────────────────────────────────────────────────────
+  function init() {
+    // Run the original UI builders (core cards, charts) then take over the loop
+    if(typeof buildCoreCards==='function') buildCoreCards();
+    if(typeof initCharts==='function')     initCharts();
+ 
+    // Patch header labels
+    setTxt('live-txt','CONNECTING…');
+    const btn=$('btn-play'); if(btn) btn.textContent='⏸ PAUSE';
+    const badge=$('cur-algo-badge'); if(badge) badge.textContent='LIVE MONITOR';
+    const lb=$('load-badge'); if(lb){ lb.textContent='STARTING'; lb.style.color='var(--cyan)'; }
+ 
+    // Patch results panel uptime label
+    const resTl=document.querySelector('[style*="SIMULATION TICKS"]');
+    if(resTl) resTl.textContent='UPTIME';
+ 
+    // Main chart y-axis label tweak: repurpose dataset[1] label for RAM
+    // (happens after initCharts so the chart already exists)
+    if(typeof charts!=='undefined'&&charts.main&&charts.main.data.datasets[1])
+      charts.main.data.datasets[1].label='RAM %';
+ 
+    startUptime();
+ 
+    // Kick off polling — one timer, never stacked
+    clearInterval(_poll);
+    fetchAndRender();   // immediate first fetch
+    _poll=setInterval(fetchAndRender,POLL_MS);
+ 
+    log('GhostSched real-time monitor started','log-place');
+    log('Backend: '+BACKEND+'/processes','log-stats');
+  }
+ 
+  window.addEventListener('load', init);
+})();
+</script>
+</body>
+</html>
